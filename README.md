@@ -49,8 +49,8 @@ curl https://ollama.ai/install.sh | sh
 ollama pull mistral
 # Ollama starts automatically as a service
 
-# 5. Run the dashboard
-python dashboard.py --port 8080 --no-ssl
+# 5. Run the dashboard (uses IMX500 AI Camera for detection)
+python dashboard.py --port 8080 --no-ssl --detector imx500
 ```
 
 > **Note:** The `--system-site-packages` flag is required because `libcamera` and `picamera2` are system packages that can't be installed via pip. This lets the venv access them.
@@ -95,7 +95,7 @@ Options:
 |------|-------------|---------|
 | `--task` | Task for LLM context | "Explore and interact" |
 | `--robot-url` | Robot API endpoint | http://localhost:5000 |
-| `--detector` | yolov5, mediapipe, imx500 | yolov5 |
+| `--detector` | imx500, yolov5, mediapipe | imx500 |
 | `--llm-model` | Ollama model name | mistral |
 | `--no-llm` | Use rule-based commands | false |
 | `--interval` | Seconds between cycles | 2.0 |

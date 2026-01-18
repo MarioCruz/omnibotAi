@@ -50,23 +50,24 @@ current_frame = None
 annotated_frame = None
 
 
-def init_system(detector_backend='yolov5', llm_model='mistral', volume=0.5):
+def init_system(detector_backend='imx500', llm_model='mistral', volume=0.5):
     """Initialize all system components"""
     global camera, detector, llm, robot
 
     print("[Dashboard] Initializing system...")
 
-    # Camera
-    print("[Dashboard] Starting camera...")
-    camera = CameraCapture(resolution=(640, 480), framerate=30)
-
-    # Detector
+    # Detector first (for IMX500, we need it before camera to get the imx500 instance)
     print(f"[Dashboard] Loading detector ({detector_backend})...")
     try:
         detector = ObjectDetector(backend=detector_backend)
     except Exception as e:
         print(f"[Dashboard] Detector error: {e}")
         detector = None
+
+    # Camera - pass IMX500 instance if using AI camera for hardware-accelerated detection
+    print("[Dashboard] Starting camera...")
+    imx500_instance = detector.get_imx500() if detector and detector_backend == 'imx500' else None
+    camera = CameraCapture(resolution=(640, 480), framerate=30, imx500=imx500_instance)
 
     # LLM
     print(f"[Dashboard] Initializing LLM ({llm_model})...")
@@ -90,8 +91,8 @@ def process_loop():
             continue
 
         try:
-            # Get frame
-            frame = camera.get_frame()
+            # Get frame and metadata (metadata needed for IMX500 hardware inference)
+            frame, metadata = camera.get_frame_and_metadata()
             if frame is None:
                 time.sleep(0.1)
                 continue
@@ -102,6 +103,9 @@ def process_loop():
             # Detect objects
             detections = []
             if detector:
+                # Pass metadata to detector for IMX500 hardware-accelerated inference
+                if hasattr(detector, 'set_metadata'):
+                    detector.set_metadata(metadata)
                 detections = detector.detect(frame)
                 system_state['detections'] = detections
                 system_state['stats']['total_detections'] += len(detections)
@@ -652,7 +656,7 @@ if __name__ == '__main__':
     import os
 
     parser = argparse.ArgumentParser(description='AI Robot Dashboard')
-    parser.add_argument('--detector', default='yolov5', choices=['yolov5', 'mediapipe', 'imx500'])
+    parser.add_argument('--detector', default='imx500', choices=['imx500', 'yolov5', 'mediapipe'])
     parser.add_argument('--llm-model', default='mistral', help='Ollama model')
     parser.add_argument('--port', type=int, default=8080, help='Dashboard port')
     parser.add_argument('--no-ssl', action='store_true', help='Disable HTTPS')

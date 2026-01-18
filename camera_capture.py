@@ -2,6 +2,7 @@
 """
 Camera Capture Module
 Threaded frame capture from Raspberry Pi Camera
+Supports IMX500 AI Camera with hardware-accelerated inference
 """
 
 from picamera2 import Picamera2
@@ -11,17 +12,40 @@ import time
 
 
 class CameraCapture:
-    def __init__(self, resolution=(640, 480), framerate=30):
-        self.picam2 = Picamera2()
+    def __init__(self, resolution=(640, 480), framerate=30, imx500=None):
+        """
+        Initialize camera capture.
 
-        config = self.picam2.create_preview_configuration(
-            main={"format": 'RGB888', "size": resolution},
-            controls={"FrameRate": framerate}
-        )
-        self.picam2.configure(config)
+        Args:
+            resolution: Tuple of (width, height)
+            framerate: Target frames per second
+            imx500: Optional IMX500 instance for AI camera configuration
+        """
+        self.picam2 = Picamera2()
+        self.imx500 = imx500
+
+        # Configure camera - use IMX500 config if available
+        if imx500 is not None:
+            # IMX500 AI Camera configuration
+            config = self.picam2.create_preview_configuration(
+                main={"format": 'RGB888', "size": resolution},
+                controls={"FrameRate": framerate}
+            )
+            # Apply IMX500-specific configuration
+            imx500.configure(self.picam2, config)
+            print("[Camera] Configured for IMX500 AI Camera (hardware accelerated)")
+        else:
+            # Standard camera configuration
+            config = self.picam2.create_preview_configuration(
+                main={"format": 'RGB888', "size": resolution},
+                controls={"FrameRate": framerate}
+            )
+            self.picam2.configure(config)
+
         self.picam2.start()
 
         self.current_frame = None
+        self.current_metadata = None
         self.frame_lock = threading.Lock()
         self.running = True
         self.frame_count = 0
@@ -37,9 +61,12 @@ class CameraCapture:
 
     def _capture_loop(self):
         while self.running:
-            frame = self.picam2.capture_array()
+            # Capture frame with metadata (needed for IMX500 inference results)
+            frame, metadata = self.picam2.capture_array(), self.picam2.capture_metadata()
+
             with self.frame_lock:
                 self.current_frame = frame
+                self.current_metadata = metadata
                 self.frame_count += 1
 
             # Calculate FPS every second
@@ -57,6 +84,13 @@ class CameraCapture:
             if self.current_frame is not None:
                 return self.current_frame.copy()
             return None
+
+    def get_frame_and_metadata(self):
+        """Get current frame and metadata (for IMX500 inference results)"""
+        with self.frame_lock:
+            frame = self.current_frame.copy() if self.current_frame is not None else None
+            metadata = self.current_metadata
+            return frame, metadata
 
     def get_fps(self):
         """Get current frames per second"""

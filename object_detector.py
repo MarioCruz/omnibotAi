@@ -37,9 +37,25 @@ class ObjectDetector:
         print(f"[Detector] Initialized with backend: {backend}")
 
     def _init_imx500(self):
-        """Initialize IMX500 native detection via rpicam-detect"""
-        self.imx500_process = None
-        self.imx500_running = False
+        """Initialize IMX500 using picamera2's native IMX500 support (hardware accelerated)"""
+        try:
+            from picamera2.devices.imx500 import IMX500
+            from picamera2.devices.imx500 import postprocess_nanodet_detection
+
+            # Default model path for MobileNet SSD on IMX500
+            model_path = self.model_path or '/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk'
+
+            # Initialize IMX500 with the neural network model
+            self.imx500 = IMX500(model_path)
+            self.postprocess = postprocess_nanodet_detection
+
+            print(f"[Detector] IMX500 initialized with model: {model_path}")
+            print("[Detector] Detection runs on-chip (hardware accelerated)")
+
+        except ImportError as e:
+            print(f"[Detector] IMX500 import failed: {e}")
+            print("[Detector] Make sure picamera2 is installed: sudo apt install python3-picamera2")
+            raise
 
         # COCO class labels for MobileNet SSD
         self.labels = [
@@ -107,92 +123,78 @@ class ObjectDetector:
 
     def _detect_imx500(self, frame: np.ndarray) -> List[Dict]:
         """
-        For IMX500, detection happens on-chip.
-        This returns cached detections from the IMX500 output parser.
-        Call start_imx500_stream() to begin detection.
+        Get detections from IMX500 hardware accelerator.
+
+        The IMX500 runs inference on-chip. We get results from the
+        camera metadata after each frame capture.
         """
-        with self._detections_lock:
-            return self._detections.copy()
-
-    def start_imx500_stream(self, callback=None):
-        """
-        Start IMX500 detection stream using rpicam-detect
-
-        The IMX500 runs detection on-chip and outputs results via metadata.
-        This starts a subprocess that parses detection output.
-        """
-        if self.imx500_running:
-            return
-
-        def parse_imx500_output():
-            cmd = [
-                'rpicam-hello',
-                '-t', '0',
-                '--post-process-file', '/usr/share/rpi-camera-assets/imx500_mobilenet_ssd.json',
-                '--lores-width', '640',
-                '--lores-height', '480',
-                '-n',  # No preview window
-                '--metadata', '-'  # Output metadata to stdout
-            ]
-
-            try:
-                self.imx500_process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                self.imx500_running = True
-
-                for line in self.imx500_process.stdout:
-                    if not self.imx500_running:
-                        break
-
-                    # Parse detection metadata
-                    if 'detection' in line.lower() or 'object' in line.lower():
-                        detections = self._parse_imx500_line(line)
-                        with self._detections_lock:
-                            self._detections = detections
-                        if callback:
-                            callback(detections)
-
-            except Exception as e:
-                print(f"[Detector] IMX500 error: {e}")
-            finally:
-                self.imx500_running = False
-
-        thread = threading.Thread(target=parse_imx500_output, daemon=True)
-        thread.start()
-
-    def _parse_imx500_line(self, line: str) -> List[Dict]:
-        """Parse IMX500 metadata output line"""
         detections = []
+
         try:
-            # IMX500 outputs JSON-like detection data
-            # Format varies by model, this handles MobileNet SSD output
-            if '{' in line:
-                data = json.loads(line)
-                for det in data.get('detections', []):
-                    detections.append({
-                        'label': self.labels[det.get('class_id', 0)],
-                        'confidence': det.get('confidence', 0),
-                        'bbox': {
-                            'x': det.get('x', 0),
-                            'y': det.get('y', 0),
-                            'width': det.get('width', 0),
-                            'height': det.get('height', 0)
-                        }
-                    })
-        except:
+            # Get the last inference results from IMX500
+            # This requires the picamera2 instance to pass metadata
+            metadata = getattr(self, '_last_metadata', None)
+            if metadata is None:
+                return detections
+
+            # Get raw output tensors from IMX500
+            np_outputs = self.imx500.get_outputs(metadata)
+            if np_outputs is None:
+                return detections
+
+            # Get input/output tensor info for coordinate scaling
+            input_w, input_h = self.imx500.get_input_size()
+
+            # Post-process the neural network output
+            boxes, scores, classes = self.postprocess(
+                np_outputs,
+                self.confidence_threshold,
+                iou_thres=0.65,
+                max_out_dets=10
+            )
+
+            # Convert to our detection format
+            frame_h, frame_w = frame.shape[:2]
+            scale_x = frame_w / input_w
+            scale_y = frame_h / input_h
+
+            for box, score, cls_id in zip(boxes, scores, classes):
+                x1, y1, x2, y2 = box
+                # Scale coordinates to frame size
+                x1 = int(x1 * scale_x)
+                y1 = int(y1 * scale_y)
+                x2 = int(x2 * scale_x)
+                y2 = int(y2 * scale_y)
+
+                label = self.labels[int(cls_id)] if int(cls_id) < len(self.labels) else f"class_{cls_id}"
+
+                detections.append({
+                    'label': label,
+                    'confidence': float(score),
+                    'bbox': {
+                        'x': x1,
+                        'y': y1,
+                        'width': x2 - x1,
+                        'height': y2 - y1
+                    }
+                })
+
+        except Exception as e:
+            # Silently handle errors during detection
             pass
+
         return detections
 
-    def stop_imx500_stream(self):
-        """Stop IMX500 detection stream"""
-        self.imx500_running = False
-        if self.imx500_process:
-            self.imx500_process.terminate()
-            self.imx500_process = None
+    def set_metadata(self, metadata):
+        """
+        Set the latest camera metadata containing IMX500 inference results.
+        Call this after each frame capture from picamera2.
+        """
+        self._last_metadata = metadata
+
+    def get_imx500(self):
+        """Return the IMX500 instance for camera configuration"""
+        return getattr(self, 'imx500', None)
 
     def _detect_yolov5(self, frame: np.ndarray) -> List[Dict]:
         """Detect using YOLOv5"""
