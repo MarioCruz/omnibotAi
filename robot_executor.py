@@ -41,9 +41,11 @@ class RobotCommandExecutor:
         Args:
             volume: Audio volume for tones (0.0 to 1.0)
         """
-        self.volume = volume
+        # Clamp volume to valid range
+        self.volume = max(0.0, min(1.0, volume))
         self.connected = False
         self.audio = None
+        self._cancel_pattern = False  # Flag to cancel running patterns
 
         # Movement durations (ms)
         self.step_duration = 500
@@ -119,6 +121,7 @@ class RobotCommandExecutor:
                 return CommandResult(True, "Turning right")
 
             elif command == 'stop':
+                self._cancel_pattern = True  # Cancel any running pattern
                 self.audio.stop()
                 return CommandResult(True, "Stopped")
 
@@ -158,12 +161,16 @@ class RobotCommandExecutor:
             return CommandResult(False, f"Error: {e}")
 
     def _run_pattern(self, pattern_name: str):
-        """Execute a movement pattern"""
+        """Execute a movement pattern (can be cancelled with stop command)"""
         if pattern_name not in self.patterns:
             return
 
+        self._cancel_pattern = False  # Reset cancel flag
         steps = self.patterns[pattern_name]
         for step in steps:
+            if self._cancel_pattern:
+                print(f"[Robot] Pattern '{pattern_name}' cancelled")
+                break
             if step == 'forward':
                 self.audio.forward(self.step_duration)
             elif step == 'backward':

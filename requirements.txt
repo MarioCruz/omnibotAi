@@ -24,4 +24,5 @@ websocket-client>=1.7.0
 python-socketio>=5.10.0
 
 # Audio Control (Tomy Omnibot)
+# Requires: sudo apt install libportaudio2 portaudio19-dev
 sounddevice>=0.4.6

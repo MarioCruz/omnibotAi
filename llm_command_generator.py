@@ -18,12 +18,16 @@ class LLMCommandGenerator:
                  model_name: str = "mistral",
                  api_url: str = "http://localhost:11434",
                  use_cloud: bool = False,
-                 cloud_api_key: str = None):
+                 cloud_api_key: str = None,
+                 frame_width: int = 640,
+                 frame_height: int = 480):
 
         self.model_name = model_name
         self.api_url = api_url
         self.use_cloud = use_cloud
         self.cloud_api_key = cloud_api_key
+        self.frame_width = frame_width
+        self.frame_height = frame_height
 
         # Available robot commands mapped to function calls
         self.robot_commands = {
@@ -111,7 +115,7 @@ class LLMCommandGenerator:
             bbox = obj['bbox']
 
             # Check if object is to left, right, or center
-            frame_center_x = 320  # Assuming 640px width
+            frame_center_x = self.frame_width / 2
             obj_center_x = bbox['x'] + bbox['width'] / 2
 
             if label in self.simple_rules:
@@ -120,10 +124,11 @@ class LLMCommandGenerator:
                     if cmd in self.robot_commands:
                         commands.append(self.robot_commands[cmd])
 
-            # Add directional adjustment based on position
-            if obj_center_x < frame_center_x - 100:
+            # Add directional adjustment based on position (threshold is 15% of frame width)
+            threshold = self.frame_width * 0.15
+            if obj_center_x < frame_center_x - threshold:
                 commands.insert(0, self.robot_commands['left'])
-            elif obj_center_x > frame_center_x + 100:
+            elif obj_center_x > frame_center_x + threshold:
                 commands.insert(0, self.robot_commands['right'])
 
         return commands[:5]  # Limit to 5 commands
@@ -146,20 +151,25 @@ class LLMCommandGenerator:
         x, y = bbox['x'], bbox['y']
         w, h = bbox['width'], bbox['height']
 
-        # Assuming 640x480 frame
         center_x = x + w / 2
         center_y = y + h / 2
 
+        # Calculate position thresholds based on frame dimensions
+        left_threshold = self.frame_width / 3
+        right_threshold = self.frame_width * 2 / 3
+        top_threshold = self.frame_height / 3
+        bottom_threshold = self.frame_height * 2 / 3
+
         h_pos = "center"
-        if center_x < 213:
+        if center_x < left_threshold:
             h_pos = "left"
-        elif center_x > 427:
+        elif center_x > right_threshold:
             h_pos = "right"
 
         v_pos = "middle"
-        if center_y < 160:
+        if center_y < top_threshold:
             v_pos = "top"
-        elif center_y > 320:
+        elif center_y > bottom_threshold:
             v_pos = "bottom"
 
         # Estimate distance based on size

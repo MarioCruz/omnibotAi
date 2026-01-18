@@ -19,8 +19,8 @@ sudo apt update && sudo apt full-upgrade -y
 # 2. Install IMX500 AI Camera support
 sudo apt install imx500-all -y
 
-# 3. Install system dependencies
-sudo apt install -y libcap-dev python3-dev python3-venv
+# 3. Install system dependencies (including PortAudio for audio tones)
+sudo apt install -y libcap-dev python3-dev python3-venv libportaudio2 portaudio19-dev
 
 # 4. Reboot to apply changes
 sudo reboot
@@ -107,15 +107,41 @@ omniai/
 ├── dashboard.py          # Web dashboard with live stream
 ├── app.py                # Simple HTTPS stream server
 ├── robot_control.py      # Headless control system
-├── camera_capture.py     # Threaded Pi camera capture
-├── object_detector.py    # Multi-backend detection
-├── llm_command_generator.py  # Ollama LLM integration
-├── robot_executor.py     # Robot command executor
+├── camera_capture.py     # Threaded Pi camera capture (atomic frame+metadata)
+├── object_detector.py    # Multi-backend detection (IMX500, YOLOv5, MediaPipe)
+├── llm_command_generator.py  # Ollama LLM integration (configurable resolution)
+├── robot_executor.py     # Robot command executor (audio tones for Omnibot)
+├── audio_commander.py    # Audio frequency generator for Tomy Omnibot
 ├── requirements.txt      # Python dependencies
 ├── generate_certs.sh     # SSL certificate generator
 ├── start.sh              # Quick start script
 └── research/             # Reference documentation
 ```
+
+## Module Configuration
+
+### LLM Command Generator
+
+The `LLMCommandGenerator` adapts to different camera resolutions:
+
+```python
+from llm_command_generator import LLMCommandGenerator
+
+# Default 640x480
+llm = LLMCommandGenerator(model_name='mistral')
+
+# Custom resolution (e.g., 1920x1080)
+llm = LLMCommandGenerator(
+    model_name='mistral',
+    frame_width=1920,
+    frame_height=1080
+)
+```
+
+The frame dimensions are used to:
+- Calculate center point for left/right object positioning
+- Set directional thresholds (15% of frame width) for turn commands
+- Describe object positions in natural language (left/center/right, top/middle/bottom)
 
 ## Endpoints
 

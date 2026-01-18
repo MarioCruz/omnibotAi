@@ -24,23 +24,15 @@ class CameraCapture:
         self.picam2 = Picamera2()
         self.imx500 = imx500
 
-        # Configure camera - use IMX500 config if available
+        # Configure camera
+        config = self.picam2.create_preview_configuration(
+            main={"format": 'RGB888', "size": resolution},
+            controls={"FrameRate": framerate}
+        )
+        self.picam2.configure(config)
+
         if imx500 is not None:
-            # IMX500 AI Camera configuration
-            config = self.picam2.create_preview_configuration(
-                main={"format": 'RGB888', "size": resolution},
-                controls={"FrameRate": framerate}
-            )
-            # Apply IMX500-specific configuration
-            imx500.configure(self.picam2, config)
             print("[Camera] Configured for IMX500 AI Camera (hardware accelerated)")
-        else:
-            # Standard camera configuration
-            config = self.picam2.create_preview_configuration(
-                main={"format": 'RGB888', "size": resolution},
-                controls={"FrameRate": framerate}
-            )
-            self.picam2.configure(config)
 
         self.picam2.start()
 
@@ -60,21 +52,36 @@ class CameraCapture:
         print(f"[Camera] Started at {resolution[0]}x{resolution[1]} @ {framerate}fps")
 
     def _capture_loop(self):
+        frames_this_second = 0
+        last_fps_update = time.time()
+
         while self.running:
-            # Capture frame with metadata (needed for IMX500 inference results)
-            frame, metadata = self.picam2.capture_array(), self.picam2.capture_metadata()
+            try:
+                # Capture frame and metadata together using capture_array with wait=True
+                # This returns the array and we get metadata right after from the same capture
+                job = self.picam2.capture_request()
+                frame = job.make_array("main")
+                metadata = job.get_metadata()
+                job.release()
 
-            with self.frame_lock:
-                self.current_frame = frame
-                self.current_metadata = metadata
-                self.frame_count += 1
+                with self.frame_lock:
+                    self.current_frame = frame
+                    self.current_metadata = metadata
 
-            # Calculate FPS every second
-            now = time.time()
-            if now - self.last_fps_time >= 1.0:
-                self.fps = self.frame_count
-                self.frame_count = 0
-                self.last_fps_time = now
+                frames_this_second += 1
+
+                # Calculate FPS every second
+                now = time.time()
+                elapsed = now - last_fps_update
+                if elapsed >= 1.0:
+                    self.fps = int(frames_this_second / elapsed)
+                    frames_this_second = 0
+                    last_fps_update = now
+
+            except Exception as e:
+                print(f"[Camera] Capture error: {e}")
+                time.sleep(0.1)
+                continue
 
             time.sleep(0.033)  # ~30 FPS
 

@@ -179,9 +179,12 @@ class ObjectDetector:
                     }
                 })
 
+        except (ValueError, IndexError, TypeError) as e:
+            # Handle expected errors during detection parsing
+            print(f"[Detector] Detection parse error: {e}")
         except Exception as e:
-            # Silently handle errors during detection
-            pass
+            # Log unexpected errors
+            print(f"[Detector] Unexpected error: {e}")
 
         return detections
 

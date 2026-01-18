@@ -28,6 +28,7 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 system_state = {
     'running': False,
     'paused': False,
+    'shutdown': False,  # Flag for graceful shutdown
     'task': 'Explore and interact with objects',
     'use_llm': True,
     'detections': [],
@@ -85,7 +86,7 @@ def process_loop():
     """Main processing loop - runs in background thread"""
     global current_frame, annotated_frame, system_state
 
-    while True:
+    while not system_state['shutdown']:
         if not system_state['running'] or system_state['paused']:
             time.sleep(0.1)
             continue
@@ -107,7 +108,8 @@ def process_loop():
                 if hasattr(detector, 'set_metadata'):
                     detector.set_metadata(metadata)
                 detections = detector.detect(frame)
-                system_state['detections'] = detections
+                # Only keep last 100 detections to prevent unbounded memory growth
+                system_state['detections'] = detections[:100]
                 system_state['stats']['total_detections'] += len(detections)
 
             # Draw detections on frame
@@ -125,7 +127,8 @@ def process_loop():
             else:
                 commands = llm.generate_commands(detections, use_llm=False) if llm else []
 
-            system_state['last_commands'] = commands
+            # Only keep last 20 commands to prevent unbounded memory growth
+            system_state['last_commands'] = commands[:20]
             system_state['stats']['total_commands'] += len(commands)
             system_state['stats']['iterations'] += 1
             system_state['stats']['fps'] = camera.get_fps()
@@ -650,10 +653,26 @@ def health():
     return jsonify({'status': 'ok'})
 
 
+def shutdown_system():
+    """Gracefully shutdown all components"""
+    global system_state, camera, robot, process_thread
+    print("\n[Dashboard] Shutting down...")
+    system_state['shutdown'] = True
+    system_state['running'] = False
+
+    if robot:
+        robot.disconnect()
+    if camera:
+        camera.stop()
+
+    print("[Dashboard] Shutdown complete")
+
+
 if __name__ == '__main__':
     import argparse
     import ssl
     import os
+    import signal
 
     parser = argparse.ArgumentParser(description='AI Robot Dashboard')
     parser.add_argument('--detector', default='imx500', choices=['imx500', 'yolov5', 'mediapipe'])
@@ -673,6 +692,14 @@ if __name__ == '__main__':
     # Start processing thread
     process_thread = threading.Thread(target=process_loop, daemon=True)
     process_thread.start()
+
+    # Register signal handlers for graceful shutdown
+    def signal_handler(sig, frame):
+        shutdown_system()
+        exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
     # SSL setup
     ssl_context = None
