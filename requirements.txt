@@ -1,0 +1,27 @@
+# Core
+flask>=3.0.0
+flask-cors>=4.0.0
+flask-socketio>=5.3.5
+
+# Camera
+picamera2>=0.3.12
+
+# Vision & ML
+numpy>=1.24.0
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Object Detection (choose one or more)
+# yolov5>=7.0.13        # Uncomment for YOLOv5 (requires torch)
+# mediapipe>=0.10.0     # Uncomment for MediaPipe
+
+# LLM Integration
+ollama>=0.1.5
+requests>=2.31.0
+
+# WebSocket (optional)
+websocket-client>=1.7.0
+python-socketio>=5.10.0
+
+# Audio Control (Tomy Omnibot)
+sounddevice>=0.4.6

@@ -1,0 +1,1397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Controller</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            color: #fff;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            font-size: 2rem;
+            text-shadow: 0 0 20px rgba(0, 200, 255, 0.5);
+        }
+
+        .controller {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            max-width: 400px;
+            width: 100%;
+        }
+
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            justify-items: center;
+        }
+
+        .btn {
+            width: 80px;
+            height: 80px;
+            border: none;
+            border-radius: 15px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        .btn:active, .btn.active {
+            transform: scale(0.95);
+        }
+
+        .direction {
+            background: linear-gradient(145deg, #0f3460, #1a1a2e);
+            color: #00d4ff;
+            border: 2px solid #00d4ff;
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+        }
+
+        .direction:active, .direction.active {
+            background: #00d4ff;
+            color: #1a1a2e;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.8);
+        }
+
+        .empty {
+            visibility: hidden;
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .action {
+            height: 60px;
+            width: 100%;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        .speaker-on {
+            background: linear-gradient(145deg, #1b4332, #0d2818);
+            color: #40c057;
+            border: 2px solid #40c057;
+        }
+
+        .speaker-on:active, .speaker-on.active {
+            background: #40c057;
+            color: #1a1a2e;
+        }
+
+        .speaker-off {
+            background: linear-gradient(145deg, #4a1a1a, #2d1010);
+            color: #ff6b6b;
+            border: 2px solid #ff6b6b;
+        }
+
+        .speaker-off:active, .speaker-off.active {
+            background: #ff6b6b;
+            color: #1a1a2e;
+        }
+
+        .beep {
+            background: linear-gradient(145deg, #3d2d5c, #2a1f40);
+            color: #b197fc;
+            border: 2px solid #b197fc;
+        }
+
+        .beep:active, .beep.active {
+            background: #b197fc;
+            color: #1a1a2e;
+        }
+
+        .tape {
+            background: linear-gradient(145deg, #4a3f00, #2d2600);
+            color: #ffd43b;
+            border: 2px solid #ffd43b;
+        }
+
+        .tape:active, .tape.active {
+            background: #ffd43b;
+            color: #1a1a2e;
+        }
+
+        .status {
+            text-align: center;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            font-family: monospace;
+        }
+
+        .status-label {
+            font-size: 0.8rem;
+            color: #888;
+            margin-bottom: 5px;
+        }
+
+        .status-value {
+            font-size: 1.1rem;
+            color: #00d4ff;
+        }
+
+        .instructions {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            font-size: 0.85rem;
+            color: #888;
+            text-align: center;
+        }
+
+        .instructions kbd {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .section-title {
+            font-size: 1rem;
+            color: #888;
+            text-align: center;
+            margin-top: 10px;
+        }
+
+        .presets {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .preset {
+            height: 50px;
+            width: 100%;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: linear-gradient(145deg, #2d4a3e, #1a2e26);
+            color: #69db7c;
+            border: 2px solid #69db7c;
+        }
+
+        .preset:active, .preset.active {
+            background: #69db7c;
+            color: #1a1a2e;
+        }
+
+        .preset:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .sequences {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .sequence {
+            height: 50px;
+            width: 100%;
+            font-size: 0.85rem;
+            font-weight: 600;
+            background: linear-gradient(145deg, #4a2d4a, #2e1a2e);
+            color: #e599f7;
+            border: 2px solid #e599f7;
+        }
+
+        .sequence:active, .sequence.active {
+            background: #e599f7;
+            color: #1a1a2e;
+        }
+
+        .sequence:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .duration-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+        }
+
+        .duration-control label {
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        .duration-control input {
+            width: 80px;
+            padding: 8px;
+            border: 2px solid #00d4ff;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #00d4ff;
+            font-size: 1rem;
+            text-align: center;
+        }
+
+        .duration-control span {
+            color: #888;
+            font-size: 0.85rem;
+        }
+
+        .speech-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .speech-control {
+            display: flex;
+            gap: 10px;
+        }
+
+        .speech-control input[type="text"] {
+            flex: 1;
+            padding: 12px;
+            border: 2px solid #ff922b;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #ff922b;
+            font-size: 1rem;
+        }
+
+        .speech-control input[type="text"]::placeholder {
+            color: #885510;
+        }
+
+        .speak-btn {
+            width: auto;
+            height: auto;
+            padding: 12px 20px;
+            background: linear-gradient(145deg, #4a2d00, #2e1a00);
+            color: #ff922b;
+            border: 2px solid #ff922b;
+            font-weight: 600;
+        }
+
+        .speak-btn:active, .speak-btn.active {
+            background: #ff922b;
+            color: #1a1a2e;
+        }
+
+        .quick-phrases {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .phrase {
+            width: 100%;
+            height: 40px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: linear-gradient(145deg, #4a2d00, #2e1a00);
+            color: #ff922b;
+            border: 2px solid #ff922b;
+        }
+
+        .phrase:active, .phrase.active {
+            background: #ff922b;
+            color: #1a1a2e;
+        }
+
+        .phrase:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Sequence Builder Styles */
+        .builder-section {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .builder-palette {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+        }
+
+        .builder-block {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            cursor: grab;
+            user-select: none;
+            transition: transform 0.15s;
+        }
+
+        .builder-block:active {
+            cursor: grabbing;
+            transform: scale(1.1);
+        }
+
+        .builder-block.forward { background: #0f3460; border: 2px solid #00d4ff; }
+        .builder-block.backward { background: #0f3460; border: 2px solid #00d4ff; }
+        .builder-block.left { background: #0f3460; border: 2px solid #00d4ff; }
+        .builder-block.right { background: #0f3460; border: 2px solid #00d4ff; }
+
+        .builder-timeline {
+            min-height: 70px;
+            padding: 10px;
+            background: rgba(0, 0, 0, 0.3);
+            border: 2px dashed #4a4a6a;
+            border-radius: 10px;
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .builder-timeline.drag-over {
+            border-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .builder-timeline-placeholder {
+            color: #4a4a6a;
+            font-size: 0.85rem;
+            text-align: center;
+            width: 100%;
+        }
+
+        .timeline-block {
+            width: 40px;
+            height: 40px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .timeline-block.forward { background: #0f3460; border: 2px solid #00d4ff; }
+        .timeline-block.backward { background: #0f3460; border: 2px solid #00d4ff; }
+        .timeline-block.left { background: #0f3460; border: 2px solid #00d4ff; }
+        .timeline-block.right { background: #0f3460; border: 2px solid #00d4ff; }
+
+        .timeline-block .step-count {
+            position: absolute;
+            bottom: -2px;
+            right: -2px;
+            background: #e599f7;
+            color: #1a1a2e;
+            font-size: 0.6rem;
+            font-weight: bold;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .timeline-block:hover::after {
+            content: '×';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ff6b6b;
+            color: white;
+            font-size: 0.7rem;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .builder-controls {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .builder-controls input {
+            flex: 1;
+            min-width: 120px;
+            padding: 10px;
+            border: 2px solid #74c0fc;
+            border-radius: 8px;
+            background: #1a1a2e;
+            color: #74c0fc;
+            font-size: 0.9rem;
+        }
+
+        .builder-btn {
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 2px solid;
+        }
+
+        .builder-btn.play {
+            background: linear-gradient(145deg, #1b4332, #0d2818);
+            color: #40c057;
+            border-color: #40c057;
+        }
+
+        .builder-btn.save {
+            background: linear-gradient(145deg, #1a3a5c, #0d1f33);
+            color: #74c0fc;
+            border-color: #74c0fc;
+        }
+
+        .builder-btn.clear {
+            background: linear-gradient(145deg, #4a1a1a, #2d1010);
+            color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+
+        .builder-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .saved-sequences {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .saved-sequence-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+
+        .saved-sequence-item .name {
+            flex: 1;
+            color: #74c0fc;
+            font-size: 0.85rem;
+        }
+
+        .saved-sequence-item .mini-btn {
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid;
+        }
+
+        .saved-sequence-item .load-btn {
+            background: #1a3a5c;
+            color: #74c0fc;
+            border-color: #74c0fc;
+        }
+
+        .saved-sequence-item .run-btn {
+            background: #1b4332;
+            color: #40c057;
+            border-color: #40c057;
+        }
+
+        .saved-sequence-item .delete-btn {
+            background: #4a1a1a;
+            color: #ff6b6b;
+            border-color: #ff6b6b;
+        }
+
+        .step-selector {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: #888;
+        }
+
+        .step-selector input {
+            width: 50px;
+            padding: 5px;
+            border: 1px solid #4a4a6a;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #e599f7;
+            text-align: center;
+            font-size: 0.85rem;
+        }
+    </style>
+</head>
+<body>
+    <h1>Robot Controller</h1>
+
+    <div class="controller">
+        <div class="status">
+            <div class="status-label">Current Command</div>
+            <div class="status-value" id="status">Ready</div>
+        </div>
+
+        <div class="dpad">
+            <div class="empty"></div>
+            <button class="btn direction" data-freq="1614" data-name="Forward" id="btn-forward">&#9650;</button>
+            <div class="empty"></div>
+
+            <button class="btn direction" data-freq="2208" data-name="Left" id="btn-left">&#9664;</button>
+            <div class="empty"></div>
+            <button class="btn direction" data-freq="1811" data-name="Right" id="btn-right">&#9654;</button>
+
+            <div class="empty"></div>
+            <button class="btn direction" data-freq="2013" data-name="Backward" id="btn-backward">&#9660;</button>
+            <div class="empty"></div>
+        </div>
+
+        <div class="instructions">
+            Keyboard: <kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd> or Arrow Keys<br>
+            Hold button to send continuous tone
+        </div>
+
+        <div class="section-title">Timed Movements</div>
+
+        <div class="duration-control">
+            <label>Step duration:</label>
+            <input type="number" id="stepDuration" value="500" min="100" max="5000" step="100">
+            <span>ms</span>
+        </div>
+
+        <div class="presets">
+            <button class="btn preset" data-action="forward" data-steps="1">Forward 1 step</button>
+            <button class="btn preset" data-action="backward" data-steps="1">Back 1 step</button>
+            <button class="btn preset" data-action="forward" data-steps="2">Forward 2 steps</button>
+            <button class="btn preset" data-action="backward" data-steps="2">Back 2 steps</button>
+            <button class="btn preset" data-action="left" data-steps="1">Turn Left</button>
+            <button class="btn preset" data-action="right" data-steps="1">Turn Right</button>
+            <button class="btn preset" data-action="left" data-steps="2">Spin Left</button>
+            <button class="btn preset" data-action="right" data-steps="2">Spin Right</button>
+        </div>
+
+        <div class="section-title">Robot Speech</div>
+
+        <div class="speech-section">
+            <div class="speech-control">
+                <input type="text" id="speechText" placeholder="Type a message..." value="Hi, my name is Tomy Omnibot">
+                <button class="btn speak-btn" id="speakBtn">Speak</button>
+            </div>
+
+            <div class="quick-phrases">
+                <button class="btn phrase" data-phrase="Hi">Hi</button>
+                <button class="btn phrase" data-phrase="Hello">Hello</button>
+                <button class="btn phrase" data-phrase="Yes">Yes</button>
+                <button class="btn phrase" data-phrase="No">No</button>
+                <button class="btn phrase" data-phrase="OK">OK</button>
+                <button class="btn phrase" data-phrase="Bye">Bye</button>
+                <button class="btn phrase" data-phrase="Help">Help</button>
+                <button class="btn phrase" data-phrase="Thank you">Thanks</button>
+                <button class="btn phrase" data-phrase="Hi, my name is Tomy Omnibot">Tomy Omnibot</button>
+                <button class="btn phrase" data-phrase="I was made by Mario the Maker">Mario Made Me</button>
+                <button class="btn phrase" data-phrase="How can I help you?">How can I help?</button>
+                <button class="btn phrase" data-phrase="Nice to meet you">Nice to meet you</button>
+                <button class="btn phrase" data-phrase="I am a robot from the 1980s">80s Robot</button>
+                <button class="btn phrase" data-phrase="Danger! Danger!">Danger!</button>
+                <button class="btn phrase" data-phrase="Affirmative">Affirmative</button>
+                <button class="btn phrase" data-phrase="Does not compute">Does not compute</button>
+            </div>
+        </div>
+
+        <div class="section-title">Sequence Builder</div>
+
+        <div class="builder-section">
+            <div class="builder-palette">
+                <div class="builder-block forward" draggable="true" data-action="forward" title="Forward">&#9650;</div>
+                <div class="builder-block backward" draggable="true" data-action="backward" title="Backward">&#9660;</div>
+                <div class="builder-block left" draggable="true" data-action="left" title="Left">&#9664;</div>
+                <div class="builder-block right" draggable="true" data-action="right" title="Right">&#9654;</div>
+                <div class="step-selector">
+                    <label>Steps:</label>
+                    <input type="number" id="blockSteps" value="1" min="0.5" max="5" step="0.5">
+                </div>
+            </div>
+
+            <div class="builder-timeline" id="builderTimeline">
+                <div class="builder-timeline-placeholder">Drag blocks here to build a sequence</div>
+            </div>
+
+            <div class="builder-controls">
+                <input type="text" id="sequenceName" placeholder="Sequence name...">
+                <button class="builder-btn play" id="playBuilderBtn">Play</button>
+                <button class="builder-btn save" id="saveBuilderBtn">Save</button>
+                <button class="builder-btn clear" id="clearBuilderBtn">Clear</button>
+            </div>
+
+            <div class="saved-sequences" id="savedSequences"></div>
+        </div>
+
+        <div class="section-title">Calibration</div>
+
+        <div class="calibration" style="display: flex; flex-direction: column; gap: 10px; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <label style="color: #888; font-size: 0.85rem;">Turn duration:</label>
+                <input type="number" id="calibTurnMs" value="3000" min="500" max="5000" step="100" style="width: 80px; padding: 8px; border: 2px solid #ffd43b; border-radius: 8px; background: #1a1a2e; color: #ffd43b; text-align: center;">
+                <span style="color: #888; font-size: 0.85rem;">ms</span>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button class="btn preset" id="calibLeft" style="flex: 1; height: 45px; background: linear-gradient(145deg, #4a3f00, #2d2600); color: #ffd43b; border: 2px solid #ffd43b;">Test Left 90°</button>
+                <button class="btn preset" id="calibRight" style="flex: 1; height: 45px; background: linear-gradient(145deg, #4a3f00, #2d2600); color: #ffd43b; border: 2px solid #ffd43b;">Test Right 90°</button>
+            </div>
+            <div style="color: #888; font-size: 0.75rem; text-align: center;">Adjust until robot turns exactly 90°. Current sequences use this value.</div>
+        </div>
+
+        <div class="section-title">Sequences</div>
+
+        <div class="sequences">
+            <button class="btn sequence" data-sequence="square">Drive Square</button>
+            <button class="btn sequence" data-sequence="zigzag">Zig-Zag</button>
+            <button class="btn sequence" data-sequence="dance">Dance</button>
+            <button class="btn sequence" data-sequence="figure8">Figure 8</button>
+            <button class="btn sequence" data-sequence="patrol">Patrol</button>
+            <button class="btn sequence" data-sequence="spiral">Spiral Out</button>
+            <button class="btn sequence" data-sequence="triangle">Triangle</button>
+            <button class="btn sequence" data-sequence="crazy">Crazy</button>
+            <button class="btn sequence" data-sequence="search">Search</button>
+            <button class="btn sequence" data-sequence="moonwalk">Moonwalk</button>
+            <button class="btn sequence" data-sequence="circle">Circle</button>
+            <button class="btn sequence" data-sequence="star">Star</button>
+        </div>
+    </div>
+
+    <script>
+        let audioCtx = null;
+        let oscillator = null;
+        let gainNode = null;
+        let currentFreq = null;
+        let isPlaying = false;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function startTone(frequency, name) {
+            initAudio();
+
+            // If already playing the same frequency, don't restart
+            if (isPlaying && currentFreq === frequency) {
+                return;
+            }
+
+            // If playing a different frequency, just change it
+            if (isPlaying && oscillator) {
+                oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                currentFreq = frequency;
+                document.getElementById('status').textContent = `${name} (${frequency} Hz)`;
+                return;
+            }
+
+            stopTone();
+
+            oscillator = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+
+            // Smooth fade in to avoid clicks
+            gainNode.gain.setValueAtTime(0, audioCtx.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.5, audioCtx.currentTime + 0.02);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            isPlaying = true;
+            currentFreq = frequency;
+
+            document.getElementById('status').textContent = `${name} (${frequency} Hz)`;
+        }
+
+        function stopTone() {
+            if (oscillator && gainNode) {
+                // Smooth fade out to avoid clicks
+                const now = audioCtx.currentTime;
+                gainNode.gain.cancelScheduledValues(now);
+                gainNode.gain.setValueAtTime(gainNode.gain.value, now);
+                gainNode.gain.linearRampToValueAtTime(0, now + 0.02);
+
+                const osc = oscillator;
+                const gain = gainNode;
+                setTimeout(() => {
+                    try {
+                        osc.stop();
+                        osc.disconnect();
+                        gain.disconnect();
+                    } catch (e) {}
+                }, 30);
+
+                oscillator = null;
+                gainNode = null;
+            }
+            isPlaying = false;
+            currentFreq = null;
+            document.getElementById('status').textContent = 'Ready';
+        }
+
+        // Button event handlers - only for buttons with data-freq (direction and action buttons)
+        document.querySelectorAll('.btn[data-freq]').forEach(btn => {
+            const freq = parseInt(btn.dataset.freq);
+            const name = btn.dataset.name;
+
+            // Mouse events
+            btn.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                btn.classList.add('active');
+                startTone(freq, name);
+            });
+
+            btn.addEventListener('mouseup', () => {
+                btn.classList.remove('active');
+                stopTone();
+            });
+
+            btn.addEventListener('mouseleave', () => {
+                btn.classList.remove('active');
+                stopTone();
+            });
+
+            // Touch events for mobile
+            btn.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                btn.classList.add('active');
+                startTone(freq, name);
+            });
+
+            btn.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                btn.classList.remove('active');
+                stopTone();
+            });
+
+            btn.addEventListener('touchcancel', () => {
+                btn.classList.remove('active');
+                stopTone();
+            });
+        });
+
+        // Keyboard controls
+        const keyMap = {
+            'ArrowUp': 'btn-forward',
+            'w': 'btn-forward',
+            'W': 'btn-forward',
+            'ArrowDown': 'btn-backward',
+            's': 'btn-backward',
+            'S': 'btn-backward',
+            'ArrowLeft': 'btn-left',
+            'a': 'btn-left',
+            'A': 'btn-left',
+            'ArrowRight': 'btn-right',
+            'd': 'btn-right',
+            'D': 'btn-right'
+        };
+
+        const activeKeys = new Set();
+
+        document.addEventListener('keydown', (e) => {
+            if (keyMap[e.key] && !activeKeys.has(e.key)) {
+                activeKeys.add(e.key);
+                const btn = document.getElementById(keyMap[e.key]);
+                if (btn) {
+                    btn.classList.add('active');
+                    startTone(parseInt(btn.dataset.freq), btn.dataset.name);
+                }
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (keyMap[e.key]) {
+                activeKeys.delete(e.key);
+                const btn = document.getElementById(keyMap[e.key]);
+                if (btn) {
+                    btn.classList.remove('active');
+                    stopTone();
+                }
+            }
+        });
+
+        // Prevent context menu on long press (mobile)
+        document.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // Frequency map for timed movements
+        const freqMap = {
+            forward: { freq: 1614, name: 'Forward' },
+            backward: { freq: 2013, name: 'Backward' },
+            left: { freq: 2208, name: 'Left' },
+            right: { freq: 1811, name: 'Right' }
+        };
+
+        // Play a tone for a specific duration
+        function playTimedTone(frequency, name, duration) {
+            return new Promise((resolve) => {
+                startTone(frequency, name);
+                setTimeout(() => {
+                    stopTone();
+                    setTimeout(resolve, 100); // Small gap between commands
+                }, duration);
+            });
+        }
+
+        // Get step duration from input
+        function getStepDuration() {
+            return parseInt(document.getElementById('stepDuration').value) || 500;
+        }
+
+        // Disable/enable preset and sequence buttons
+        function setButtonsDisabled(disabled) {
+            document.querySelectorAll('.preset, .sequence').forEach(btn => {
+                btn.disabled = disabled;
+            });
+        }
+
+        // Timed movement presets
+        document.querySelectorAll('.preset').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const action = btn.dataset.action;
+                const steps = parseInt(btn.dataset.steps);
+                const { freq, name } = freqMap[action];
+                const duration = getStepDuration() * steps;
+
+                btn.classList.add('active');
+                setButtonsDisabled(true);
+
+                await playTimedTone(freq, `${name} (${steps} step${steps > 1 ? 's' : ''})`, duration);
+
+                btn.classList.remove('active');
+                setButtonsDisabled(false);
+            });
+        });
+
+        // Predefined sequences
+        // Turn calibration: 1 step = 90° (3000ms at calibrated value)
+        const sequences = {
+            square: [
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 }       // 90°
+            ],
+            zigzag: [
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 0.5 },    // 45°
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 0.5 }      // 45°
+            ],
+            dance: [
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'right', steps: 2 },      // 180°
+                { action: 'left', steps: 2 },       // 180°
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'backward', steps: 2 },
+                { action: 'forward', steps: 2 },
+                { action: 'backward', steps: 2 }
+            ],
+            figure8: [
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 }       // 90°
+            ],
+            patrol: [
+                { action: 'forward', steps: 4 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 4 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 4 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 4 },
+                { action: 'right', steps: 1 }       // 90°
+            ],
+            spiral: [
+                { action: 'forward', steps: 1 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 4 },
+                { action: 'right', steps: 1 }       // 90°
+            ],
+            triangle: [
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.33 },   // 120°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.33 },   // 120°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.33 }    // 120°
+            ],
+            crazy: [
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.25 },    // 22.5°
+                { action: 'backward', steps: 1 },
+                { action: 'right', steps: 0.5 },    // 45°
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'backward', steps: 1 },
+                { action: 'right', steps: 0.25 },   // 22.5°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'backward', steps: 2 },
+                { action: 'right', steps: 1 }       // 90°
+            ],
+            search: [
+                { action: 'forward', steps: 2 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 2 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 3 },
+                { action: 'left', steps: 1 },       // 90°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1 },      // 90°
+                { action: 'forward', steps: 4 },
+                { action: 'left', steps: 1 }        // 90°
+            ],
+            moonwalk: [
+                { action: 'backward', steps: 2 },
+                { action: 'left', steps: 0.15 },    // ~14° shimmy
+                { action: 'backward', steps: 2 },
+                { action: 'right', steps: 0.15 },   // ~14° shimmy
+                { action: 'backward', steps: 2 },
+                { action: 'left', steps: 0.15 },    // ~14° shimmy
+                { action: 'backward', steps: 2 },
+                { action: 'right', steps: 0.15 },   // ~14° shimmy
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 2 }        // 180° spin
+            ],
+            circle: [
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 },     // 45°
+                { action: 'forward', steps: 1 },
+                { action: 'left', steps: 0.5 }      // 45° (8x45=360°)
+            ],
+            star: [
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.6 },    // 144°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.6 },    // 144°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.6 },    // 144°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.6 },    // 144°
+                { action: 'forward', steps: 3 },
+                { action: 'right', steps: 1.6 }     // 144° (5x144=720°)
+            ]
+        };
+
+        // Get calibrated turn duration (for 90° turn)
+        function getTurnDuration() {
+            return parseInt(document.getElementById('calibTurnMs').value) || 1500;
+        }
+
+        // Fixed forward step duration
+        const FORWARD_STEP_DURATION = 500;
+
+        // Calibration buttons
+        document.getElementById('calibLeft').addEventListener('click', async () => {
+            const btn = document.getElementById('calibLeft');
+            btn.classList.add('active');
+            setButtonsDisabled(true);
+            await playTimedTone(freqMap.left.freq, 'Calibrate Left', getTurnDuration());
+            btn.classList.remove('active');
+            setButtonsDisabled(false);
+        });
+
+        document.getElementById('calibRight').addEventListener('click', async () => {
+            const btn = document.getElementById('calibRight');
+            btn.classList.add('active');
+            setButtonsDisabled(true);
+            await playTimedTone(freqMap.right.freq, 'Calibrate Right', getTurnDuration());
+            btn.classList.remove('active');
+            setButtonsDisabled(false);
+        });
+
+        document.querySelectorAll('.sequence').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const seqName = btn.dataset.sequence;
+                const seq = sequences[seqName];
+
+                btn.classList.add('active');
+                setButtonsDisabled(true);
+
+                for (const step of seq) {
+                    const { freq, name } = freqMap[step.action];
+                    // Use calibrated turn duration for turns, fixed duration for forward/backward
+                    const isTurn = step.action === 'left' || step.action === 'right';
+                    const baseDuration = isTurn ? getTurnDuration() : FORWARD_STEP_DURATION;
+                    const duration = baseDuration * step.steps;
+                    document.getElementById('status').textContent = `${seqName}: ${name}`;
+                    await playTimedTone(freq, name, duration);
+                }
+
+                btn.classList.remove('active');
+                setButtonsDisabled(false);
+            });
+        });
+
+        // Speech synthesis
+        const SPKON_FREQ = 1422;
+        const SPKOFF_FREQ = 4650;
+
+        async function speakText(text) {
+            if (!('speechSynthesis' in window)) {
+                alert('Speech synthesis not supported in this browser');
+                return;
+            }
+
+            document.getElementById('status').textContent = `Speaking: "${text}"`;
+
+            // Turn on robot speaker first
+            await playTimedTone(SPKON_FREQ, 'Speaker On', 300);
+            await new Promise(r => setTimeout(r, 200));
+
+            // Use browser's speech synthesis with robot voice
+            return new Promise((resolve) => {
+                const utterance = new SpeechSynthesisUtterance(text);
+
+                // Try to find a robotic voice (macOS has some fun ones)
+                const voices = speechSynthesis.getVoices();
+                const robotVoice = voices.find(v => v.name === 'Zarvox') ||
+                    voices.find(v => v.name === 'Trinoids') ||
+                    voices.find(v => v.name === 'Albert') ||
+                    voices.find(v => v.name === 'Fred') ||
+                    voices.find(v => v.name.toLowerCase().includes('robot'));
+
+                if (robotVoice) {
+                    utterance.voice = robotVoice;
+                    utterance.rate = 1.0;
+                    utterance.pitch = 1.0;
+                } else {
+                    // Fallback: make any voice sound robotic
+                    utterance.rate = 0.7;
+                    utterance.pitch = 0.1;
+                }
+                utterance.volume = 1.0;
+
+                utterance.onend = () => {
+                    setTimeout(async () => {
+                        // Turn off robot speaker
+                        await playTimedTone(SPKOFF_FREQ, 'Speaker Off', 300);
+                        document.getElementById('status').textContent = 'Ready';
+                        resolve();
+                    }, 300);
+                };
+
+                utterance.onerror = () => {
+                    document.getElementById('status').textContent = 'Speech error';
+                    resolve();
+                };
+
+                speechSynthesis.speak(utterance);
+            });
+        }
+
+        // Speak button
+        document.getElementById('speakBtn').addEventListener('click', async () => {
+            const text = document.getElementById('speechText').value.trim();
+            if (!text) return;
+
+            const btn = document.getElementById('speakBtn');
+            btn.classList.add('active');
+            btn.disabled = true;
+            setButtonsDisabled(true);
+
+            await speakText(text);
+
+            btn.classList.remove('active');
+            btn.disabled = false;
+            setButtonsDisabled(false);
+        });
+
+        // Quick phrase buttons
+        document.querySelectorAll('.phrase').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const phrase = btn.dataset.phrase;
+                document.getElementById('speechText').value = phrase;
+
+                btn.classList.add('active');
+                setButtonsDisabled(true);
+
+                await speakText(phrase);
+
+                btn.classList.remove('active');
+                setButtonsDisabled(false);
+            });
+        });
+
+        // Enter key to speak
+        document.getElementById('speechText').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('speakBtn').click();
+            }
+        });
+
+        // ========== SEQUENCE BUILDER ==========
+        let builderSequence = [];
+        const actionIcons = {
+            forward: '▲',
+            backward: '▼',
+            left: '◀',
+            right: '▶'
+        };
+
+        // Load saved sequences from localStorage
+        function loadSavedSequences() {
+            const saved = localStorage.getItem('omnibotSequences');
+            return saved ? JSON.parse(saved) : {};
+        }
+
+        // Save sequences to localStorage
+        function saveSequencesToStorage(seqs) {
+            localStorage.setItem('omnibotSequences', JSON.stringify(seqs));
+        }
+
+        // Render the timeline
+        function renderTimeline() {
+            const timeline = document.getElementById('builderTimeline');
+            if (builderSequence.length === 0) {
+                timeline.innerHTML = '<div class="builder-timeline-placeholder">Drag blocks here to build a sequence</div>';
+            } else {
+                timeline.innerHTML = builderSequence.map((step, index) => `
+                    <div class="timeline-block ${step.action}" data-index="${index}" title="Click to remove">
+                        ${actionIcons[step.action]}
+                        <span class="step-count">${step.steps}</span>
+                    </div>
+                `).join('');
+
+                // Add click to remove
+                timeline.querySelectorAll('.timeline-block').forEach(block => {
+                    block.addEventListener('click', () => {
+                        const index = parseInt(block.dataset.index);
+                        builderSequence.splice(index, 1);
+                        renderTimeline();
+                    });
+                });
+            }
+        }
+
+        // Render saved sequences list
+        function renderSavedSequences() {
+            const container = document.getElementById('savedSequences');
+            const saved = loadSavedSequences();
+            const names = Object.keys(saved);
+
+            if (names.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+
+            container.innerHTML = names.map(name => `
+                <div class="saved-sequence-item">
+                    <span class="name">${name} (${saved[name].length} steps)</span>
+                    <button class="mini-btn load-btn" data-name="${name}">Load</button>
+                    <button class="mini-btn run-btn" data-name="${name}">Run</button>
+                    <button class="mini-btn delete-btn" data-name="${name}">Del</button>
+                </div>
+            `).join('');
+
+            // Add event listeners
+            container.querySelectorAll('.load-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const name = btn.dataset.name;
+                    builderSequence = [...saved[name]];
+                    document.getElementById('sequenceName').value = name;
+                    renderTimeline();
+                });
+            });
+
+            container.querySelectorAll('.run-btn').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const name = btn.dataset.name;
+                    await runBuilderSequence(saved[name], name);
+                });
+            });
+
+            container.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const name = btn.dataset.name;
+                    const seqs = loadSavedSequences();
+                    delete seqs[name];
+                    saveSequencesToStorage(seqs);
+                    renderSavedSequences();
+                });
+            });
+        }
+
+        // Run a sequence
+        async function runBuilderSequence(seq, name = 'Custom') {
+            if (seq.length === 0) return;
+
+            setButtonsDisabled(true);
+            document.getElementById('playBuilderBtn').disabled = true;
+
+            for (const step of seq) {
+                const { freq, name: actionName } = freqMap[step.action];
+                const duration = getStepDuration() * step.steps;
+                document.getElementById('status').textContent = `${name}: ${actionName}`;
+                await playTimedTone(freq, actionName, duration);
+            }
+
+            document.getElementById('status').textContent = 'Ready';
+            setButtonsDisabled(false);
+            document.getElementById('playBuilderBtn').disabled = false;
+        }
+
+        // Drag and drop for palette blocks
+        document.querySelectorAll('.builder-block').forEach(block => {
+            block.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('action', block.dataset.action);
+                e.dataTransfer.effectAllowed = 'copy';
+            });
+        });
+
+        // Timeline drop zone
+        const timeline = document.getElementById('builderTimeline');
+
+        timeline.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+            timeline.classList.add('drag-over');
+        });
+
+        timeline.addEventListener('dragleave', () => {
+            timeline.classList.remove('drag-over');
+        });
+
+        timeline.addEventListener('drop', (e) => {
+            e.preventDefault();
+            timeline.classList.remove('drag-over');
+            const action = e.dataTransfer.getData('action');
+            if (action) {
+                const steps = parseFloat(document.getElementById('blockSteps').value) || 1;
+                builderSequence.push({ action, steps });
+                renderTimeline();
+            }
+        });
+
+        // Touch support for mobile drag
+        document.querySelectorAll('.builder-block').forEach(block => {
+            block.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                const action = block.dataset.action;
+                const steps = parseFloat(document.getElementById('blockSteps').value) || 1;
+                builderSequence.push({ action, steps });
+                renderTimeline();
+            });
+        });
+
+        // Play button
+        document.getElementById('playBuilderBtn').addEventListener('click', async () => {
+            await runBuilderSequence(builderSequence, 'Builder');
+        });
+
+        // Save button
+        document.getElementById('saveBuilderBtn').addEventListener('click', () => {
+            const name = document.getElementById('sequenceName').value.trim();
+            if (!name) {
+                alert('Please enter a sequence name');
+                return;
+            }
+            if (builderSequence.length === 0) {
+                alert('Please add some blocks to the sequence');
+                return;
+            }
+
+            const seqs = loadSavedSequences();
+            seqs[name] = [...builderSequence];
+            saveSequencesToStorage(seqs);
+            renderSavedSequences();
+            document.getElementById('status').textContent = `Saved: ${name}`;
+        });
+
+        // Clear button
+        document.getElementById('clearBuilderBtn').addEventListener('click', () => {
+            builderSequence = [];
+            document.getElementById('sequenceName').value = '';
+            renderTimeline();
+        });
+
+        // Initialize saved sequences on load
+        renderSavedSequences();
+    </script>
+</body>
+</html>
