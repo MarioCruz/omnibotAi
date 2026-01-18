@@ -143,6 +143,20 @@ The frame dimensions are used to:
 - Set directional thresholds (15% of frame width) for turn commands
 - Describe object positions in natural language (left/center/right, top/middle/bottom)
 
+### Audio Commander
+
+The `AudioCommander` generates audio tones for Tomy Omnibot control:
+
+```python
+from audio_commander import AudioCommander
+
+commander = AudioCommander(volume=0.5)
+commander.forward(500)     # Play 1614 Hz for 500ms
+commander.speak("Hello!")  # Text-to-speech via espeak
+```
+
+**Security**: Text input to `speak()` is sanitized (alphanumeric + basic punctuation only) to prevent command injection.
+
 ## Endpoints
 
 | URL | Description |

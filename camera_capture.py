@@ -56,13 +56,13 @@ class CameraCapture:
         last_fps_update = time.time()
 
         while self.running:
+            job = None
             try:
-                # Capture frame and metadata together using capture_array with wait=True
-                # This returns the array and we get metadata right after from the same capture
+                # Capture frame and metadata together using capture_request()
+                # This returns the array and we get metadata from the same capture
                 job = self.picam2.capture_request()
                 frame = job.make_array("main")
                 metadata = job.get_metadata()
-                job.release()
 
                 with self.frame_lock:
                     self.current_frame = frame
@@ -82,6 +82,10 @@ class CameraCapture:
                 print(f"[Camera] Capture error: {e}")
                 time.sleep(0.1)
                 continue
+            finally:
+                # Always release the capture request to prevent resource leak
+                if job is not None:
+                    job.release()
 
             time.sleep(0.033)  # ~30 FPS
 
@@ -96,7 +100,8 @@ class CameraCapture:
         """Get current frame and metadata (for IMX500 inference results)"""
         with self.frame_lock:
             frame = self.current_frame.copy() if self.current_frame is not None else None
-            metadata = self.current_metadata
+            # Copy metadata dict to ensure thread safety (metadata is a dict reference)
+            metadata = dict(self.current_metadata) if self.current_metadata is not None else None
             return frame, metadata
 
     def get_fps(self):

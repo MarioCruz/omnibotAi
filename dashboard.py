@@ -68,11 +68,16 @@ def init_system(detector_backend='imx500', llm_model='mistral', volume=0.5):
     # Camera - pass IMX500 instance if using AI camera for hardware-accelerated detection
     print("[Dashboard] Starting camera...")
     imx500_instance = detector.get_imx500() if detector and detector_backend == 'imx500' else None
-    camera = CameraCapture(resolution=(640, 480), framerate=30, imx500=imx500_instance)
+    camera_resolution = (640, 480)
+    camera = CameraCapture(resolution=camera_resolution, framerate=30, imx500=imx500_instance)
 
-    # LLM
+    # LLM - pass camera resolution for accurate object positioning
     print(f"[Dashboard] Initializing LLM ({llm_model})...")
-    llm = LLMCommandGenerator(model_name=llm_model)
+    llm = LLMCommandGenerator(
+        model_name=llm_model,
+        frame_width=camera_resolution[0],
+        frame_height=camera_resolution[1]
+    )
 
     # Robot - now uses audio tones for Tomy Omnibot
     print(f"[Dashboard] Initializing audio commander (volume: {volume})...")
@@ -108,9 +113,10 @@ def process_loop():
                 if hasattr(detector, 'set_metadata'):
                     detector.set_metadata(metadata)
                 detections = detector.detect(frame)
-                # Only keep last 100 detections to prevent unbounded memory growth
-                system_state['detections'] = detections[:100]
+                # Count detections from this frame (full count, not limited)
                 system_state['stats']['total_detections'] += len(detections)
+                # Limit stored detections to prevent unbounded memory growth
+                system_state['detections'] = detections[:100]
 
             # Draw detections on frame
             annotated = draw_detections(frame, detections)
@@ -183,15 +189,18 @@ def draw_detections(frame, detections):
 
 def generate_mjpeg():
     """Generate MJPEG stream with detection overlays"""
-    while True:
+    while not system_state['shutdown']:
         with frame_lock:
             frame = annotated_frame if annotated_frame is not None else current_frame
 
         if frame is not None:
-            # Encode as JPEG
-            _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
-            yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            try:
+                # Encode as JPEG
+                _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            except Exception:
+                pass  # Client disconnected or encoding error
 
         time.sleep(0.033)  # ~30 FPS
 
@@ -628,15 +637,17 @@ def api_pause():
 
 @app.route('/api/task', methods=['POST'])
 def api_task():
-    data = request.json
+    data = request.json or {}
     system_state['task'] = data.get('task', 'Explore')
     return jsonify({'status': 'ok', 'task': system_state['task']})
 
 
 @app.route('/api/command', methods=['POST'])
 def api_command():
-    data = request.json
+    data = request.json or {}
     cmd = data.get('command', '')
+    if not cmd:
+        return jsonify({'status': 'error', 'message': 'No command provided'})
     if robot and robot.connected:
         result = robot.execute(cmd)
         return jsonify({'status': 'ok', 'result': result.success})

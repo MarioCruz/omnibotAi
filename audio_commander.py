@@ -60,18 +60,32 @@ class AudioCommander:
         tone = np.sin(2 * np.pi * frequency * t) * self.volume
         return tone.astype(np.float32)
 
-    def _play_tone(self, frequency: float, duration_ms: int):
-        """Play a tone at the specified frequency and duration."""
+    def _play_tone(self, frequency: float, duration_ms: int) -> bool:
+        """Play a tone at the specified frequency and duration. Returns True if successful."""
         if not SOUNDDEVICE_AVAILABLE:
             print(f"[AudioCommander] Would play {frequency}Hz for {duration_ms}ms (sounddevice not available)")
-            return
+            return False
 
         try:
+            self.is_playing = True
             tone = self._generate_tone(frequency, duration_ms)
             sd.play(tone, self.sample_rate)
-            sd.wait()
+            # Wait for playback with timeout protection
+            # sd.wait() doesn't accept timeout, so we poll with a deadline
+            timeout_s = (duration_ms / 1000.0) + 1.0
+            deadline = time.time() + timeout_s
+            while sd.get_stream() and sd.get_stream().active:
+                if time.time() > deadline:
+                    print("[AudioCommander] Playback timeout, stopping")
+                    sd.stop()
+                    break
+                time.sleep(0.01)
+            self.is_playing = False
+            return True
         except Exception as e:
             print(f"[AudioCommander] Error playing tone: {e}")
+            self.is_playing = False
+            return False
 
     def forward(self, duration_ms: int = 500):
         """Move forward."""
@@ -111,17 +125,28 @@ class AudioCommander:
         Speak text using espeak (with speaker on/off tones).
 
         Args:
-            text: Text to speak
+            text: Text to speak (sanitized to alphanumeric, spaces, and basic punctuation)
         """
         import subprocess
+        import re
+
+        # Sanitize text to prevent command injection
+        # Only allow alphanumeric, spaces, and basic punctuation
+        sanitized = re.sub(r'[^a-zA-Z0-9\s.,!?\'-]', '', text)
+        if not sanitized:
+            print("[AudioCommander] No valid text to speak after sanitization")
+            return
 
         # Turn speaker on
-        self.speaker_on(200)
+        if not self.speaker_on(200):
+            print("[AudioCommander] Failed to turn speaker on")
+            return
         time.sleep(0.1)
 
-        # Use espeak to speak the text
+        # Use espeak to speak the text (text passed as list element, not shell-parsed)
+        # Note: Don't use capture_output=True as it suppresses audio output
         try:
-            subprocess.run(['espeak', text], capture_output=True, timeout=10)
+            subprocess.run(['espeak', '--', sanitized], timeout=10)
         except FileNotFoundError:
             print("[AudioCommander] espeak not found - install with: sudo apt install espeak")
         except subprocess.TimeoutExpired:

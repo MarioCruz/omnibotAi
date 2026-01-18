@@ -7,10 +7,6 @@ Supports multiple backends: IMX500 (native), YOLOv5, MediaPipe
 import cv2
 import numpy as np
 from typing import List, Dict, Optional
-import subprocess
-import json
-import threading
-import time
 
 
 class ObjectDetector:
@@ -20,10 +16,6 @@ class ObjectDetector:
         self.backend = backend
         self.confidence_threshold = confidence_threshold
         self.model_path = model_path
-
-        # Detection results cache for IMX500
-        self._detections = []
-        self._detections_lock = threading.Lock()
 
         if backend == 'imx500':
             self._init_imx500()

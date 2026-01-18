@@ -259,6 +259,33 @@ The dashboard handles graceful shutdown on SIGINT/SIGTERM:
 - Disconnects robot
 - Stops camera capture
 
+### AudioCommander
+```python
+from audio_commander import AudioCommander
+
+commander = AudioCommander(volume=0.5)
+
+# Movement tones (returns True if successful)
+commander.forward(500)   # 1614 Hz for 500ms
+commander.backward(500)  # 2013 Hz
+commander.left(500)      # 2208 Hz
+commander.right(500)     # 1811 Hz
+
+# Speech (text is sanitized to prevent command injection)
+commander.speak("Hello!")  # Only alphanumeric, spaces, basic punctuation allowed
+
+# Check state
+commander.is_playing  # True if audio currently playing
+commander.stop()      # Stop any playing audio
+```
+
+### Security Notes
+- `speak()` sanitizes input with regex: `[^a-zA-Z0-9\s.,!?'-]` removed
+- `espeak` called with `--` to prevent option injection
+- `sd.wait()` has timeout (duration + 1 second) to prevent hangs
+- API endpoints validate `request.json` (handles None case)
+- Camera metadata copied by value (not reference) for thread safety
+
 ## Development Workflow
 
 **Primary development happens on local GitHub repo** to avoid Pi SD card corruption issues.
