@@ -52,7 +52,12 @@ class AIRobotSystem:
 
         print("\n[Init] Starting camera...")
         imx500_instance = self.detector.get_imx500() if self.detector and detector_backend == 'imx500' else None
-        self.camera = CameraCapture(resolution=resolution, imx500=imx500_instance)
+        intrinsics = self.detector.get_intrinsics() if self.detector and detector_backend == 'imx500' else None
+        self.camera = CameraCapture(resolution=resolution, imx500=imx500_instance, intrinsics=intrinsics)
+
+        # Pass picam2 to detector for coordinate conversion
+        if self.detector and detector_backend == 'imx500' and hasattr(self.camera, 'picam2'):
+            self.detector.set_picam2(self.camera.picam2)
 
         print("[Init] Initializing LLM command generator...")
         self.llm = LLMCommandGenerator(

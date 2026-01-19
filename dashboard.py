@@ -149,11 +149,13 @@ def process_loop():
                 for cmd in commands[:3]:  # Limit to 3 commands per cycle
                     robot.execute(cmd)
 
-            # Emit update via WebSocket
+            # Emit update via WebSocket (include LLM debug info)
+            llm_debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
             socketio.emit('update', {
                 'detections': detections,
                 'commands': commands,
-                'stats': system_state['stats']
+                'stats': system_state['stats'],
+                'llm_debug': llm_debug
             })
 
             time.sleep(0.5)  # Process every 0.5 seconds
@@ -389,6 +391,42 @@ DASHBOARD_HTML = """
         .log-entry.success { color: #00ff88; }
         .log-entry.error { color: #ff4444; }
 
+        .llm-debug {
+            background: rgba(0,0,0,0.3);
+            border-radius: 6px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 11px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .llm-debug .section {
+            margin-bottom: 12px;
+        }
+        .llm-debug .section-title {
+            color: #ff922b;
+            font-weight: bold;
+            margin-bottom: 4px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .llm-debug .section-content {
+            color: #aaa;
+            padding-left: 8px;
+            border-left: 2px solid rgba(255,146,43,0.3);
+        }
+        .llm-debug .mode-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: bold;
+        }
+        .llm-debug .mode-llm { background: #00d4ff; color: #000; }
+        .llm-debug .mode-rules { background: #ff922b; color: #000; }
+
         @media (max-width: 900px) {
             .container { grid-template-columns: 1fr; }
         }
@@ -492,6 +530,16 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
+    <!-- LLM Debug Panel - Full Width -->
+    <div style="max-width: 1400px; margin: 20px auto; padding: 0 20px;">
+        <div class="panel">
+            <h2>LLM Debug <span id="llmModeBadge" class="mode-badge" style="margin-left: 10px;"></span></h2>
+            <div class="llm-debug" id="llmDebug">
+                <div style="color: #666; text-align: center; padding: 20px;">Waiting for LLM activity...</div>
+            </div>
+        </div>
+    </div>
+
     <script>
         const socket = io();
 
@@ -532,6 +580,44 @@ DASHBOARD_HTML = """
                     <div class="command-item">${c}</div>
                 `).join('');
                 log(`Executed: ${data.commands.join(', ')}`, 'info');
+            }
+
+            // Update LLM debug panel
+            if (data.llm_debug && data.llm_debug.prompt) {
+                const llmDebug = document.getElementById('llmDebug');
+                const modeBadge = document.getElementById('llmModeBadge');
+
+                // Update mode badge
+                const mode = data.llm_debug.mode || 'none';
+                modeBadge.textContent = mode.toUpperCase();
+                modeBadge.className = 'mode-badge mode-' + mode;
+
+                // Escape HTML to prevent XSS
+                const escapeHtml = (str) => {
+                    const div = document.createElement('div');
+                    div.textContent = str;
+                    return div.innerHTML;
+                };
+
+                llmDebug.innerHTML = `
+                    <div class="section">
+                        <div class="section-title">
+                            <span>PROMPT</span>
+                            <span style="color: #666;">${data.llm_debug.timestamp || ''}</span>
+                        </div>
+                        <div class="section-content">${escapeHtml(data.llm_debug.prompt || '')}</div>
+                    </div>
+                    <div class="section">
+                        <div class="section-title">RESPONSE</div>
+                        <div class="section-content">${escapeHtml(data.llm_debug.response || '')}</div>
+                    </div>
+                    <div class="section">
+                        <div class="section-title">PARSED COMMANDS</div>
+                        <div class="section-content" style="color: #00ff88;">${
+                            (data.llm_debug.parsed_commands || []).join('\\n') || 'None'
+                        }</div>
+                    </div>
+                `;
             }
         });
 
@@ -607,11 +693,695 @@ DASHBOARD_HTML = """
 </html>
 """
 
+# Kid-Friendly Dashboard HTML - Retro 80s Tomy Robot Style
+KIDS_DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OMNIBOT COMMAND CENTER</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --neon-pink: #ff00ff;
+            --neon-cyan: #00ffff;
+            --neon-yellow: #ffff00;
+            --neon-orange: #ff8800;
+            --neon-green: #00ff00;
+            --dark-purple: #1a0a2e;
+            --mid-purple: #2d1b4e;
+        }
+
+        body {
+            font-family: 'Press Start 2P', monospace;
+            background: var(--dark-purple);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* Synthwave grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                linear-gradient(180deg, var(--dark-purple) 0%, var(--mid-purple) 50%, #ff006650 100%),
+                repeating-linear-gradient(90deg, transparent, transparent 50px, #ff00ff15 50px, #ff00ff15 51px),
+                repeating-linear-gradient(0deg, transparent, transparent 50px, #00ffff15 50px, #00ffff15 51px);
+            z-index: -2;
+        }
+
+        /* Animated grid floor */
+        .grid-floor {
+            position: fixed;
+            bottom: 0;
+            left: -50%;
+            width: 200%;
+            height: 40%;
+            background:
+                repeating-linear-gradient(90deg, var(--neon-pink) 0px, transparent 1px, transparent 60px),
+                repeating-linear-gradient(0deg, var(--neon-pink) 0px, transparent 1px, transparent 40px);
+            transform: perspective(500px) rotateX(60deg);
+            transform-origin: center top;
+            opacity: 0.3;
+            animation: gridMove 2s linear infinite;
+            z-index: -1;
+        }
+        @keyframes gridMove {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 40px; }
+        }
+
+        /* CRT scanline effect */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.1) 2px,
+                rgba(0, 0, 0, 0.1) 4px
+            );
+            pointer-events: none;
+            z-index: 1000;
+        }
+
+        .main-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 15px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Title with glow */
+        .title {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .title h1 {
+            font-size: 18px;
+            color: var(--neon-cyan);
+            text-shadow:
+                0 0 10px var(--neon-cyan),
+                0 0 20px var(--neon-cyan),
+                0 0 40px var(--neon-cyan);
+            letter-spacing: 4px;
+            animation: flicker 3s infinite;
+        }
+        .title .subtitle {
+            font-size: 10px;
+            color: var(--neon-pink);
+            margin-top: 8px;
+            text-shadow: 0 0 10px var(--neon-pink);
+        }
+        @keyframes flicker {
+            0%, 100% { opacity: 1; }
+            92% { opacity: 1; }
+            93% { opacity: 0.8; }
+            94% { opacity: 1; }
+        }
+
+        /* Video screen with CRT frame */
+        .video-frame {
+            background: linear-gradient(145deg, #444 0%, #222 50%, #111 100%);
+            border-radius: 15px;
+            padding: 15px;
+            box-shadow:
+                inset 0 2px 4px rgba(255,255,255,0.2),
+                inset 0 -2px 4px rgba(0,0,0,0.5),
+                0 10px 40px rgba(0,0,0,0.8),
+                0 0 30px rgba(255,0,255,0.3);
+            position: relative;
+        }
+        .video-frame::before {
+            content: 'VISUAL FEED';
+            position: absolute;
+            top: -8px;
+            left: 20px;
+            background: var(--dark-purple);
+            padding: 0 10px;
+            font-size: 8px;
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+        }
+        .video-box {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 3px solid #333;
+            position: relative;
+        }
+        .video-box img {
+            width: 100%;
+            display: block;
+            filter: contrast(1.1) saturate(1.2);
+        }
+        /* Screen reflection */
+        .video-box::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 100%);
+            pointer-events: none;
+        }
+
+        /* LED indicator panel */
+        .status-panel {
+            background: linear-gradient(180deg, #333 0%, #1a1a1a 100%);
+            border-radius: 10px;
+            padding: 12px 20px;
+            margin: 15px 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 20px;
+            border: 2px solid #444;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .led-cluster {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .led {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #330000;
+            border: 2px solid #222;
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.5);
+        }
+        .led.power { background: #003300; }
+        .led.power.on {
+            background: var(--neon-green);
+            box-shadow: 0 0 10px var(--neon-green), 0 0 20px var(--neon-green);
+        }
+        .led.status { background: #333300; }
+        .led.status.on {
+            background: var(--neon-yellow);
+            box-shadow: 0 0 10px var(--neon-yellow);
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .status-text {
+            font-size: 10px;
+            color: var(--neon-green);
+            text-shadow: 0 0 5px var(--neon-green);
+        }
+        .status-text.off { color: #666; text-shadow: none; }
+
+        /* Section labels */
+        .section-label {
+            font-size: 10px;
+            color: var(--neon-yellow);
+            text-shadow: 0 0 10px var(--neon-yellow);
+            margin: 25px 0 12px;
+            text-align: center;
+            letter-spacing: 2px;
+        }
+
+        /* Arcade buttons - Mission select */
+        .missions {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .arcade-btn {
+            padding: 15px 10px;
+            border: none;
+            border-radius: 8px;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 9px;
+            cursor: pointer;
+            transition: all 0.1s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+            text-transform: uppercase;
+
+            /* 3D button effect */
+            background: linear-gradient(180deg, #666 0%, #444 50%, #333 100%);
+            border-top: 3px solid #888;
+            border-left: 3px solid #777;
+            border-right: 3px solid #222;
+            border-bottom: 5px solid #111;
+            color: #fff;
+            text-shadow: 2px 2px 0 #000;
+        }
+        .arcade-btn:hover {
+            transform: translateY(-2px);
+            border-bottom-width: 7px;
+        }
+        .arcade-btn:active {
+            transform: translateY(2px);
+            border-bottom-width: 2px;
+        }
+        .arcade-btn .icon {
+            font-size: 28px;
+            filter: drop-shadow(2px 2px 0 #000);
+        }
+
+        /* Button color variants with glow strips */
+        .arcade-btn.pink {
+            background: linear-gradient(180deg, #ff66ff 0%, #cc00cc 50%, #990099 100%);
+            border-top-color: #ff99ff;
+            border-left-color: #ff66ff;
+        }
+        .arcade-btn.pink::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: var(--neon-pink);
+            box-shadow: 0 0 10px var(--neon-pink);
+            border-radius: 2px;
+        }
+
+        .arcade-btn.cyan {
+            background: linear-gradient(180deg, #66ffff 0%, #00cccc 50%, #009999 100%);
+            border-top-color: #99ffff;
+            border-left-color: #66ffff;
+            color: #003333;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.3);
+        }
+        .arcade-btn.cyan::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: var(--neon-cyan);
+            box-shadow: 0 0 10px var(--neon-cyan);
+            border-radius: 2px;
+        }
+
+        .arcade-btn.yellow {
+            background: linear-gradient(180deg, #ffff66 0%, #cccc00 50%, #999900 100%);
+            border-top-color: #ffff99;
+            border-left-color: #ffff66;
+            color: #333300;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.3);
+        }
+        .arcade-btn.yellow::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: var(--neon-yellow);
+            box-shadow: 0 0 10px var(--neon-yellow);
+            border-radius: 2px;
+        }
+
+        .arcade-btn.orange {
+            background: linear-gradient(180deg, #ffaa66 0%, #ff8800 50%, #cc6600 100%);
+            border-top-color: #ffcc99;
+            border-left-color: #ffaa66;
+        }
+        .arcade-btn.orange::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: var(--neon-orange);
+            box-shadow: 0 0 10px var(--neon-orange);
+            border-radius: 2px;
+        }
+
+        .arcade-btn.green {
+            background: linear-gradient(180deg, #66ff66 0%, #00cc00 50%, #009900 100%);
+            border-top-color: #99ff99;
+            border-left-color: #66ff66;
+            color: #003300;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.3);
+        }
+        .arcade-btn.green::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: var(--neon-green);
+            box-shadow: 0 0 10px var(--neon-green);
+            border-radius: 2px;
+        }
+
+        /* D-Pad controller */
+        .dpad-container {
+            display: flex;
+            justify-content: center;
+            margin: 10px 0 20px;
+        }
+        .dpad {
+            display: grid;
+            grid-template-columns: repeat(3, 60px);
+            grid-template-rows: repeat(3, 60px);
+            gap: 5px;
+        }
+        .dpad-btn {
+            border: none;
+            border-radius: 8px;
+            font-size: 24px;
+            cursor: pointer;
+            background: linear-gradient(180deg, #555 0%, #333 50%, #222 100%);
+            border-top: 2px solid #666;
+            border-left: 2px solid #555;
+            border-right: 2px solid #111;
+            border-bottom: 4px solid #000;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 10px var(--neon-cyan);
+            transition: all 0.05s;
+        }
+        .dpad-btn:hover {
+            background: linear-gradient(180deg, #666 0%, #444 50%, #333 100%);
+        }
+        .dpad-btn:active {
+            transform: translateY(2px);
+            border-bottom-width: 2px;
+            background: linear-gradient(180deg, #444 0%, #333 50%, #222 100%);
+        }
+        .dpad-btn.stop {
+            background: linear-gradient(180deg, #ff4444 0%, #cc0000 50%, #990000 100%);
+            border-top-color: #ff6666;
+            border-left-color: #ff4444;
+            color: #fff;
+            text-shadow: 0 0 5px #fff;
+            font-size: 16px;
+        }
+        .dpad-btn.empty {
+            visibility: hidden;
+        }
+
+        /* Power button */
+        .power-section {
+            margin: 15px 0;
+        }
+        .power-btn {
+            display: block;
+            width: 100%;
+            padding: 18px;
+            border: none;
+            border-radius: 10px;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.1s;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .power-btn.start {
+            background: linear-gradient(180deg, #66ff66 0%, #00cc00 50%, #009900 100%);
+            border-top: 3px solid #99ff99;
+            border-left: 3px solid #66ff66;
+            border-right: 3px solid #006600;
+            border-bottom: 6px solid #003300;
+            color: #003300;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.3);
+            box-shadow: 0 0 20px rgba(0,255,0,0.3);
+        }
+        .power-btn.stop {
+            background: linear-gradient(180deg, #ff6666 0%, #cc0000 50%, #990000 100%);
+            border-top: 3px solid #ff9999;
+            border-left: 3px solid #ff6666;
+            border-right: 3px solid #660000;
+            border-bottom: 6px solid #330000;
+            color: #fff;
+            text-shadow: 2px 2px 0 #000;
+            box-shadow: 0 0 20px rgba(255,0,0,0.3);
+        }
+        .power-btn:hover {
+            transform: translateY(-2px);
+        }
+        .power-btn:active {
+            transform: translateY(3px);
+            border-bottom-width: 2px;
+        }
+
+        /* Mission display panel */
+        .mission-display {
+            background: #111;
+            border: 3px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            position: relative;
+        }
+        .mission-display::before {
+            content: 'CURRENT MISSION';
+            position: absolute;
+            top: -8px;
+            left: 15px;
+            background: var(--dark-purple);
+            padding: 0 8px;
+            font-size: 7px;
+            color: var(--neon-orange);
+            text-shadow: 0 0 5px var(--neon-orange);
+        }
+        .mission-display .mission-text {
+            font-size: 10px;
+            color: var(--neon-green);
+            text-shadow: 0 0 10px var(--neon-green);
+            text-align: center;
+            min-height: 20px;
+        }
+        .mission-display .mission-text.none {
+            color: #444;
+            text-shadow: none;
+        }
+
+        /* Decorative corner brackets */
+        .corner-decor {
+            position: fixed;
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--neon-pink);
+            opacity: 0.5;
+        }
+        .corner-decor.tl { top: 10px; left: 10px; border-right: none; border-bottom: none; }
+        .corner-decor.tr { top: 10px; right: 10px; border-left: none; border-bottom: none; }
+        .corner-decor.bl { bottom: 10px; left: 10px; border-right: none; border-top: none; }
+        .corner-decor.br { bottom: 10px; right: 10px; border-left: none; border-top: none; }
+
+        @media (max-width: 600px) {
+            .title h1 { font-size: 12px; letter-spacing: 2px; }
+            .title .subtitle { font-size: 8px; }
+            .missions { grid-template-columns: 1fr; }
+            .arcade-btn { font-size: 8px; padding: 12px 8px; }
+            .arcade-btn .icon { font-size: 24px; }
+            .dpad { grid-template-columns: repeat(3, 50px); grid-template-rows: repeat(3, 50px); }
+            .section-label { font-size: 8px; }
+            .power-btn { font-size: 10px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="scanlines"></div>
+    <div class="grid-floor"></div>
+    <div class="corner-decor tl"></div>
+    <div class="corner-decor tr"></div>
+    <div class="corner-decor bl"></div>
+    <div class="corner-decor br"></div>
+
+    <div class="main-container">
+        <div class="title">
+            <h1>OMNIBOT COMMAND CENTER</h1>
+            <div class="subtitle">// TOMY ROBOTICS DIVISION //</div>
+        </div>
+
+        <div class="video-frame">
+            <div class="video-box">
+                <img src="/stream" alt="Robot Camera">
+            </div>
+        </div>
+
+        <div class="status-panel">
+            <div class="led-cluster">
+                <div class="led power" id="powerLed"></div>
+                <span class="status-text off" id="statusText">STANDBY</span>
+            </div>
+            <div class="led-cluster">
+                <div class="led status" id="statusLed"></div>
+                <span class="status-text off" id="modeText">IDLE</span>
+            </div>
+        </div>
+
+        <div class="power-section">
+            <button class="power-btn start" id="powerBtn" onclick="togglePower()">
+                [ ACTIVATE ROBOT ]
+            </button>
+        </div>
+
+        <div class="section-label">// SELECT MISSION //</div>
+        <div class="missions">
+            <button class="arcade-btn pink" onclick="startMission('FIND SHOE', 'Find and go to the shoe')">
+                <span class="icon">👟</span>
+                <span>Find Shoe</span>
+            </button>
+            <button class="arcade-btn cyan" onclick="startMission('FIND HUMAN', 'Find and greet any person you see')">
+                <span class="icon">👤</span>
+                <span>Find Human</span>
+            </button>
+            <button class="arcade-btn yellow" onclick="startMission('FIND BALL', 'Find and approach the sports ball')">
+                <span class="icon">⚽</span>
+                <span>Find Ball</span>
+            </button>
+            <button class="arcade-btn orange" onclick="startMission('EXPLORE', 'Explore and describe what you see')">
+                <span class="icon">🔍</span>
+                <span>Explore</span>
+            </button>
+            <button class="arcade-btn green" onclick="doDance()">
+                <span class="icon">🕺</span>
+                <span>Dance</span>
+            </button>
+            <button class="arcade-btn cyan" onclick="sayHello()">
+                <span class="icon">📢</span>
+                <span>Speak</span>
+            </button>
+        </div>
+
+        <div class="section-label">// MANUAL CONTROL //</div>
+        <div class="dpad-container">
+            <div class="dpad">
+                <div class="dpad-btn empty"></div>
+                <button class="dpad-btn" onclick="drive('forward')">▲</button>
+                <div class="dpad-btn empty"></div>
+                <button class="dpad-btn" onclick="drive('left')">◄</button>
+                <button class="dpad-btn stop" onclick="drive('stop')">STOP</button>
+                <button class="dpad-btn" onclick="drive('right')">►</button>
+                <div class="dpad-btn empty"></div>
+                <button class="dpad-btn" onclick="drive('backward')">▼</button>
+                <div class="dpad-btn empty"></div>
+            </div>
+        </div>
+
+        <div class="mission-display">
+            <div class="mission-text none" id="missionText">AWAITING ORDERS...</div>
+        </div>
+    </div>
+
+    <script>
+        let isRunning = false;
+
+        function togglePower() {
+            const btn = document.getElementById('powerBtn');
+            const powerLed = document.getElementById('powerLed');
+            const statusLed = document.getElementById('statusLed');
+            const statusText = document.getElementById('statusText');
+            const modeText = document.getElementById('modeText');
+
+            if (!isRunning) {
+                fetch('/api/start', { method: 'POST' });
+                btn.textContent = '[ DEACTIVATE ROBOT ]';
+                btn.className = 'power-btn stop';
+                powerLed.className = 'led power on';
+                statusLed.className = 'led status on';
+                statusText.textContent = 'ONLINE';
+                statusText.className = 'status-text';
+                modeText.textContent = 'ACTIVE';
+                modeText.className = 'status-text';
+                isRunning = true;
+            } else {
+                fetch('/api/stop', { method: 'POST' });
+                btn.textContent = '[ ACTIVATE ROBOT ]';
+                btn.className = 'power-btn start';
+                powerLed.className = 'led power';
+                statusLed.className = 'led status';
+                statusText.textContent = 'STANDBY';
+                statusText.className = 'status-text off';
+                modeText.textContent = 'IDLE';
+                modeText.className = 'status-text off';
+                isRunning = false;
+            }
+        }
+
+        function startMission(displayName, taskText) {
+            const missionEl = document.getElementById('missionText');
+            missionEl.textContent = displayName;
+            missionEl.className = 'mission-text';
+            fetch('/api/task', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ task: taskText })
+            });
+
+            // Auto-start if not running
+            if (!isRunning) {
+                togglePower();
+            }
+        }
+
+        function drive(direction) {
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: direction })
+            });
+        }
+
+        function doDance() {
+            const missionEl = document.getElementById('missionText');
+            missionEl.textContent = 'DANCE MODE';
+            missionEl.className = 'mission-text';
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'dance' })
+            });
+        }
+
+        function sayHello() {
+            const missionEl = document.getElementById('missionText');
+            missionEl.textContent = 'VOICE OUTPUT';
+            missionEl.className = 'mission-text';
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'speakText("Hello! I am Omnibot!")' })
+            });
+        }
+    </script>
+</body>
+</html>
+"""
+
 
 # Routes
 @app.route('/')
 def index():
     return render_template_string(DASHBOARD_HTML)
+
+
+@app.route('/kids')
+def kids_dashboard():
+    """Kid-friendly simplified dashboard"""
+    return render_template_string(KIDS_DASHBOARD_HTML)
 
 
 @app.route('/stream')

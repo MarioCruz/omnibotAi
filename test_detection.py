@@ -24,7 +24,7 @@ from picamera2.devices.imx500 import NetworkIntrinsics, postprocess_nanodet_dete
 # YOLOv8 nano (accurate): imx500_network_yolov8n_pp.rpk
 # YOLO11 nano (latest): imx500_network_yolo11n_pp.rpk
 # NanoDet Plus: imx500_network_nanodet_plus_416x416_pp.rpk
-MODEL_PATH = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
+MODEL_PATH = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 CONFIDENCE_THRESHOLD = 0.3
 IOU_THRESHOLD = 0.65
 MAX_DETECTIONS = 10

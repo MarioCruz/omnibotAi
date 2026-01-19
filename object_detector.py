@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Object Detection Module - IMX500 YOLOv8 with Official picamera2 API
+Object Detection Module - IMX500 YOLO11 with Official picamera2 API
 Supports multiple backends: IMX500 (native hardware), YOLOv5, MediaPipe
 """
 
@@ -13,8 +13,8 @@ from functools import lru_cache
 class ObjectDetector:
     """Object detector with IMX500 hardware acceleration using official picamera2 API"""
 
-    # Default to YOLOv8 for better accuracy
-    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
+    # Default to YOLO11 for latest accuracy
+    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 
     def __init__(self, backend='imx500', model_path=None, confidence_threshold=0.3):
         self.backend = backend

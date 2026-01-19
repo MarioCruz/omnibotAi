@@ -60,6 +60,15 @@ class LLMCommandGenerator:
             'cup': ['forward'],
         }
 
+        # Debug info - stores last prompt/response for UI visibility
+        self.last_debug = {
+            'prompt': '',
+            'response': '',
+            'parsed_commands': [],
+            'mode': 'none',  # 'llm', 'rules', or 'none'
+            'timestamp': ''
+        }
+
         print(f"[LLM] Initialized with model: {model_name}")
         print(f"[LLM] Available commands: {list(self.robot_commands.keys())}")
 
@@ -92,6 +101,7 @@ class LLMCommandGenerator:
 
     def _generate_with_llm(self, objects: List[Dict], context: str) -> List[str]:
         """Generate commands using LLM"""
+        import time as _time
         object_summary = self._format_objects(objects)
         prompt = self._create_prompt(object_summary, context)
 
@@ -101,11 +111,23 @@ class LLMCommandGenerator:
             response = self._call_ollama(prompt)
 
         commands = self._parse_response(response)
+
+        # Store debug info
+        self.last_debug = {
+            'prompt': prompt,
+            'response': response,
+            'parsed_commands': commands,
+            'mode': 'llm',
+            'timestamp': _time.strftime('%H:%M:%S')
+        }
+
         return commands
 
     def _generate_with_rules(self, objects: List[Dict]) -> List[str]:
         """Generate commands using simple rules (no LLM needed)"""
+        import time as _time
         commands = []
+        rule_log = []
 
         # Sort by confidence, process highest first
         sorted_objects = sorted(objects, key=lambda x: x['confidence'], reverse=True)
@@ -123,15 +145,29 @@ class LLMCommandGenerator:
                 for cmd in rule_commands:
                     if cmd in self.robot_commands:
                         commands.append(self.robot_commands[cmd])
+                        rule_log.append(f"Rule: {label} -> {cmd}")
 
             # Add directional adjustment based on position (threshold is 15% of frame width)
             threshold = self.frame_width * 0.15
             if obj_center_x < frame_center_x - threshold:
                 commands.insert(0, self.robot_commands['left'])
+                rule_log.insert(0, f"Position: {label} is LEFT of center -> turn left")
             elif obj_center_x > frame_center_x + threshold:
                 commands.insert(0, self.robot_commands['right'])
+                rule_log.insert(0, f"Position: {label} is RIGHT of center -> turn right")
 
-        return commands[:5]  # Limit to 5 commands
+        result = commands[:5]  # Limit to 5 commands
+
+        # Store debug info for rules mode
+        self.last_debug = {
+            'prompt': f"Rule-based mode (no LLM)\nObjects: {[o['label'] for o in sorted_objects[:3]]}",
+            'response': '\n'.join(rule_log) if rule_log else 'No matching rules',
+            'parsed_commands': result,
+            'mode': 'rules',
+            'timestamp': _time.strftime('%H:%M:%S')
+        }
+
+        return result
 
     def _format_objects(self, objects: List[Dict]) -> str:
         """Format detected objects for LLM prompt"""
