@@ -50,7 +50,7 @@ class LLMCommandGenerator:
 
         # Simple rule-based responses as fallback
         self.simple_rules = {
-            'person': ['greet', 'wave'],
+            'person': ['greet'],
             'cat': ['forward', 'stop'],
             'dog': ['forward', 'stop'],
             'ball': ['forward', 'forward'],

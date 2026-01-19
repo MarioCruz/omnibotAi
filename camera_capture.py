@@ -2,7 +2,7 @@
 """
 Camera Capture Module
 Threaded frame capture from Raspberry Pi Camera
-Supports IMX500 AI Camera with hardware-accelerated inference
+Supports IMX500 AI Camera with hardware-accelerated inference (YOLOv8)
 """
 
 from picamera2 import Picamera2
@@ -12,7 +12,7 @@ import time
 
 
 class CameraCapture:
-    def __init__(self, resolution=(640, 480), framerate=30, imx500=None):
+    def __init__(self, resolution=(640, 480), framerate=30, imx500=None, intrinsics=None):
         """
         Initialize camera capture.
 
@@ -20,18 +20,33 @@ class CameraCapture:
             resolution: Tuple of (width, height)
             framerate: Target frames per second
             imx500: Optional IMX500 instance for AI camera configuration
+            intrinsics: Optional NetworkIntrinsics for model-specific settings
         """
-        self.picam2 = Picamera2()
-        self.imx500 = imx500
+        # Use IMX500's camera_num if available
+        if imx500 is not None:
+            self.picam2 = Picamera2(imx500.camera_num)
+        else:
+            self.picam2 = Picamera2()
 
-        # Configure camera
+        self.imx500 = imx500
+        self.intrinsics = intrinsics
+
+        # Use model's inference rate if available
+        if intrinsics and hasattr(intrinsics, 'inference_rate') and intrinsics.inference_rate:
+            framerate = intrinsics.inference_rate
+
+        # Configure camera with larger buffer for IMX500
+        buffer_count = 12 if imx500 else 4
         config = self.picam2.create_preview_configuration(
             main={"format": 'RGB888', "size": resolution},
-            controls={"FrameRate": framerate}
+            controls={"FrameRate": framerate},
+            buffer_count=buffer_count
         )
         self.picam2.configure(config)
 
         if imx500 is not None:
+            # Show model loading progress bar
+            imx500.show_network_fw_progress_bar()
             print("[Camera] Configured for IMX500 AI Camera (hardware accelerated)")
 
         self.picam2.start()
@@ -56,13 +71,12 @@ class CameraCapture:
         last_fps_update = time.time()
 
         while self.running:
-            job = None
             try:
-                # Capture frame and metadata together using capture_request()
-                # This returns the array and we get metadata from the same capture
+                # Capture frame and metadata together
                 job = self.picam2.capture_request()
                 frame = job.make_array("main")
                 metadata = job.get_metadata()
+                job.release()
 
                 with self.frame_lock:
                     self.current_frame = frame
@@ -82,10 +96,6 @@ class CameraCapture:
                 print(f"[Camera] Capture error: {e}")
                 time.sleep(0.1)
                 continue
-            finally:
-                # Always release the capture request to prevent resource leak
-                if job is not None:
-                    job.release()
 
             time.sleep(0.033)  # ~30 FPS
 
@@ -100,8 +110,7 @@ class CameraCapture:
         """Get current frame and metadata (for IMX500 inference results)"""
         with self.frame_lock:
             frame = self.current_frame.copy() if self.current_frame is not None else None
-            # Copy metadata dict to ensure thread safety (metadata is a dict reference)
-            metadata = dict(self.current_metadata) if self.current_metadata is not None else None
+            metadata = self.current_metadata
             return frame, metadata
 
     def get_fps(self):

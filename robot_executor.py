@@ -34,12 +34,13 @@ class RobotCommandExecutor:
     - Speaker Off: 4650 Hz
     """
 
-    def __init__(self, volume: float = 0.5):
+    def __init__(self, volume: float = 0.5, robot_url: Optional[str] = None):
         """
         Initialize the robot executor.
 
         Args:
             volume: Audio volume for tones (0.0 to 1.0)
+            robot_url: Unused for audio control (kept for compatibility)
         """
         # Clamp volume to valid range
         self.volume = max(0.0, min(1.0, volume))
@@ -60,7 +61,8 @@ class RobotCommandExecutor:
             'zigzag': ['forward', 'right', 'forward', 'left'] * 3,
             'spiral': ['forward', 'left', 'forward', 'forward', 'left', 'forward', 'forward', 'forward', 'left'],
             'search': ['forward', 'left', 'forward', 'right', 'right', 'forward', 'left', 'left'],
-            'patrol': ['forward', 'forward', 'forward', 'left', 'left', 'forward', 'forward', 'forward', 'left', 'left']
+            'patrol': ['forward', 'forward', 'forward', 'left', 'left', 'forward', 'forward', 'forward', 'left', 'left'],
+            'wave': ['left', 'right', 'left', 'right']
         }
 
     def connect(self) -> bool:
@@ -80,10 +82,15 @@ class RobotCommandExecutor:
             self.connected = False
             return False
 
+    def stop(self):
+        """Stop any current movement/audio"""
+        if self.audio:
+            self._cancel_pattern = True
+            self.audio.stop()
+
     def disconnect(self):
         """Cleanup audio resources"""
-        if self.audio:
-            self.audio.stop()
+        self.stop()
         self.connected = False
         print("[Robot] Disconnected")
 
@@ -159,6 +166,14 @@ class RobotCommandExecutor:
 
         except Exception as e:
             return CommandResult(False, f"Error: {e}")
+
+    def execute_sequence(self, commands, delay: float = 0.3):
+        """Execute a list of commands with a fixed delay between each."""
+        results = []
+        for cmd in commands:
+            results.append(self.execute(cmd))
+            time.sleep(max(0.0, delay))
+        return results
 
     def _run_pattern(self, pattern_name: str):
         """Execute a movement pattern (can be cancelled with stop command)"""

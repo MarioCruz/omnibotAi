@@ -65,11 +65,16 @@ def init_system(detector_backend='imx500', llm_model='mistral', volume=0.5):
         print(f"[Dashboard] Detector error: {e}")
         detector = None
 
-    # Camera - pass IMX500 instance if using AI camera for hardware-accelerated detection
+    # Camera - pass IMX500 instance and intrinsics for hardware-accelerated detection
     print("[Dashboard] Starting camera...")
     imx500_instance = detector.get_imx500() if detector and detector_backend == 'imx500' else None
+    intrinsics = detector.get_intrinsics() if detector and detector_backend == 'imx500' else None
     camera_resolution = (640, 480)
-    camera = CameraCapture(resolution=camera_resolution, framerate=30, imx500=imx500_instance)
+    camera = CameraCapture(resolution=camera_resolution, framerate=30, imx500=imx500_instance, intrinsics=intrinsics)
+
+    # Pass picam2 instance to detector for accurate coordinate conversion
+    if detector and detector_backend == 'imx500' and hasattr(camera, 'picam2'):
+        detector.set_picam2(camera.picam2)
 
     # LLM - pass camera resolution for accurate object positioning
     print(f"[Dashboard] Initializing LLM ({llm_model})...")
@@ -151,7 +156,7 @@ def process_loop():
                 'stats': system_state['stats']
             })
 
-            time.sleep(1.5)  # Process every 1.5 seconds
+            time.sleep(0.5)  # Process every 0.5 seconds
 
         except Exception as e:
             print(f"[Dashboard] Process error: {e}")

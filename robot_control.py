@@ -21,7 +21,7 @@ class AIRobotSystem:
     """Main AI Robot Control System"""
 
     def __init__(self,
-                 robot_url: str = "http://localhost:5000",
+                 volume: float = 0.5,
                  detector_backend: str = 'yolov5',
                  llm_model: str = 'mistral',
                  resolution: tuple = (640, 480),
@@ -42,9 +42,6 @@ class AIRobotSystem:
         self.total_commands = 0
 
         # Initialize components
-        print("\n[Init] Starting camera...")
-        self.camera = CameraCapture(resolution=resolution)
-
         print("[Init] Loading object detector...")
         try:
             self.detector = ObjectDetector(backend=detector_backend)
@@ -53,8 +50,16 @@ class AIRobotSystem:
             print("[Init] Falling back to rule-based detection")
             self.detector = None
 
+        print("\n[Init] Starting camera...")
+        imx500_instance = self.detector.get_imx500() if self.detector and detector_backend == 'imx500' else None
+        self.camera = CameraCapture(resolution=resolution, imx500=imx500_instance)
+
         print("[Init] Initializing LLM command generator...")
-        self.llm = LLMCommandGenerator(model_name=llm_model)
+        self.llm = LLMCommandGenerator(
+            model_name=llm_model,
+            frame_width=resolution[0],
+            frame_height=resolution[1]
+        )
 
         if use_llm:
             if not self.llm.check_ollama_status():
@@ -62,7 +67,7 @@ class AIRobotSystem:
                 self.use_llm = False
 
         print("[Init] Connecting to robot...")
-        self.robot = RobotCommandExecutor(robot_url=robot_url)
+        self.robot = RobotCommandExecutor(volume=volume)
         self.robot_connected = self.robot.connect()
 
         if not self.robot_connected:
@@ -83,12 +88,14 @@ class AIRobotSystem:
         Returns:
             (detections, commands) tuple
         """
-        frame = self.camera.get_frame()
+        frame, metadata = self.camera.get_frame_and_metadata()
         if frame is None:
             return [], []
 
         # Detect objects
         if self.detector:
+            if hasattr(self.detector, 'set_metadata'):
+                self.detector.set_metadata(metadata)
             detections = self.detector.detect(frame)
         else:
             detections = []
@@ -153,7 +160,9 @@ class AIRobotSystem:
                         print(f"    > {cmd}")
 
                     if self.robot_connected:
-                        self.robot.execute_sequence(commands, delay=0.3)
+                        for cmd in commands:
+                            self.robot.execute(cmd)
+                            time.sleep(0.3)
                     else:
                         print("[Command] (Robot not connected, commands logged only)")
                 else:
@@ -213,13 +222,6 @@ class AIRobotSystem:
         print(f"  Iterations:     {self.iteration_count}")
         print(f"  Total detections: {self.total_detections}")
         print(f"  Total commands:   {self.total_commands}")
-
-        if self.robot_connected:
-            robot_stats = self.robot.get_stats()
-            print(f"  Commands sent:    {robot_stats['total']}")
-            print(f"  Success rate:     {robot_stats['success_rate']:.1f}%")
-            print(f"  Avg latency:      {robot_stats['avg_latency_ms']:.0f}ms")
-
         print("=" * 50)
 
 
@@ -240,9 +242,9 @@ Examples:
                        default="Explore and interact with objects",
                        help='Task context for command generation')
 
-    parser.add_argument('--robot-url', type=str,
-                       default="http://localhost:5000",
-                       help='Robot API URL')
+    parser.add_argument('--volume', type=float,
+                       default=0.5,
+                       help='Audio volume (0.0-1.0)')
 
     parser.add_argument('--detector', type=str,
                        choices=['yolov5', 'mediapipe', 'imx500'],
@@ -280,7 +282,7 @@ Examples:
 
     # Create and run system
     system = AIRobotSystem(
-        robot_url=args.robot_url,
+        volume=args.volume,
         detector_backend=args.detector,
         llm_model=args.llm_model,
         resolution=resolution,

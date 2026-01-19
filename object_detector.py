@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-Object Detection Module
-Supports multiple backends: IMX500 (native), YOLOv5, MediaPipe
+Object Detection Module - IMX500 YOLOv8 with Official picamera2 API
+Supports multiple backends: IMX500 (native hardware), YOLOv5, MediaPipe
 """
 
 import cv2
 import numpy as np
 from typing import List, Dict, Optional
+from functools import lru_cache
 
 
 class ObjectDetector:
-    """Base object detector with multiple backend support"""
+    """Object detector with IMX500 hardware acceleration using official picamera2 API"""
 
-    def __init__(self, backend='imx500', model_path=None, confidence_threshold=0.5):
+    # Default to YOLOv8 for better accuracy
+    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
+
+    def __init__(self, backend='imx500', model_path=None, confidence_threshold=0.3):
         self.backend = backend
         self.confidence_threshold = confidence_threshold
         self.model_path = model_path
@@ -29,19 +33,33 @@ class ObjectDetector:
         print(f"[Detector] Initialized with backend: {backend}")
 
     def _init_imx500(self):
-        """Initialize IMX500 using picamera2's native IMX500 support (hardware accelerated)"""
+        """Initialize IMX500 using official picamera2 API with NetworkIntrinsics"""
         try:
-            from picamera2.devices.imx500 import IMX500
-            from picamera2.devices.imx500 import postprocess_nanodet_detection
+            from picamera2.devices import IMX500
+            from picamera2.devices.imx500 import NetworkIntrinsics
 
-            # Default model path for MobileNet SSD on IMX500
-            model_path = self.model_path or '/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk'
+            # Use YOLOv8 by default for better accuracy
+            model_path = self.model_path or self.DEFAULT_MODEL
 
             # Initialize IMX500 with the neural network model
+            # This uploads the model firmware to the camera's AI chip
             self.imx500 = IMX500(model_path)
-            self.postprocess = postprocess_nanodet_detection
+
+            # Get network intrinsics (model metadata)
+            self.intrinsics = self.imx500.network_intrinsics
+            if not self.intrinsics:
+                self.intrinsics = NetworkIntrinsics()
+                self.intrinsics.task = "object detection"
+            elif self.intrinsics.task != "object detection":
+                print(f"[Detector] Warning: Model task is '{self.intrinsics.task}', expected 'object detection'")
+
+            # Set labels
+            self.intrinsics.labels = self.labels
+            self.intrinsics.update_with_defaults()
 
             print(f"[Detector] IMX500 initialized with model: {model_path}")
+            print(f"[Detector] Model task: {self.intrinsics.task}")
+            print(f"[Detector] Inference rate: {self.intrinsics.inference_rate} fps")
             print("[Detector] Detection runs on-chip (hardware accelerated)")
 
         except ImportError as e:
@@ -49,22 +67,22 @@ class ObjectDetector:
             print("[Detector] Make sure picamera2 is installed: sudo apt install python3-picamera2")
             raise
 
-        # COCO class labels for MobileNet SSD
-        self.labels = [
-            'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
-            'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign',
-            'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep',
-            'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella',
-            'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard',
-            'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard',
-            'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork',
-            'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
-            'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair',
-            'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
-            'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
-            'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
-            'scissors', 'teddy bear', 'hair drier', 'toothbrush'
-        ]
+    # COCO class labels (80 classes)
+    labels = [
+        'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train',
+        'truck', 'boat', 'traffic light', 'fire hydrant', 'stop sign',
+        'parking meter', 'bench', 'bird', 'cat', 'dog', 'horse', 'sheep',
+        'cow', 'elephant', 'bear', 'zebra', 'giraffe', 'backpack', 'umbrella',
+        'handbag', 'tie', 'suitcase', 'frisbee', 'skis', 'snowboard',
+        'sports ball', 'kite', 'baseball bat', 'baseball glove', 'skateboard',
+        'surfboard', 'tennis racket', 'bottle', 'wine glass', 'cup', 'fork',
+        'knife', 'spoon', 'bowl', 'banana', 'apple', 'sandwich', 'orange',
+        'broccoli', 'carrot', 'hot dog', 'pizza', 'donut', 'cake', 'chair',
+        'couch', 'potted plant', 'bed', 'dining table', 'toilet', 'tv',
+        'laptop', 'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+        'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
+        'scissors', 'teddy bear', 'hair drier', 'toothbrush'
+    ]
 
     def _init_yolov5(self):
         """Initialize YOLOv5 detection"""
@@ -115,68 +133,104 @@ class ObjectDetector:
 
     def _detect_imx500(self, frame: np.ndarray) -> List[Dict]:
         """
-        Get detections from IMX500 hardware accelerator.
+        Get detections from IMX500 hardware accelerator using official picamera2 API.
 
-        The IMX500 runs inference on-chip. We get results from the
-        camera metadata after each frame capture.
+        Uses imx500.get_outputs() with add_batch=True and handles model-specific
+        bbox_normalization and bbox_order from NetworkIntrinsics.
         """
         detections = []
 
         try:
-            # Get the last inference results from IMX500
-            # This requires the picamera2 instance to pass metadata
             metadata = getattr(self, '_last_metadata', None)
             if metadata is None:
                 return detections
 
-            # Get raw output tensors from IMX500
-            np_outputs = self.imx500.get_outputs(metadata)
+            # Get outputs with batch dimension added
+            np_outputs = self.imx500.get_outputs(metadata, add_batch=True)
             if np_outputs is None:
                 return detections
 
-            # Get input/output tensor info for coordinate scaling
             input_w, input_h = self.imx500.get_input_size()
 
-            # Post-process the neural network output
-            boxes, scores, classes = self.postprocess(
-                np_outputs,
-                self.confidence_threshold,
-                iou_thres=0.65,
-                max_out_dets=10
-            )
+            # Check for nanodet postprocessing
+            if self.intrinsics and self.intrinsics.postprocess == "nanodet":
+                from picamera2.devices.imx500 import postprocess_nanodet_detection
+                from picamera2.devices.imx500.postprocess import scale_boxes
+                boxes, scores, classes = postprocess_nanodet_detection(
+                    outputs=np_outputs[0],
+                    conf=self.confidence_threshold,
+                    iou_thres=0.65,
+                    max_out_dets=10
+                )[0]
+                boxes = scale_boxes(boxes, 1, 1, input_h, input_w, False, False)
+            else:
+                # Standard SSD/YOLO output format
+                boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-            # Convert to our detection format
-            frame_h, frame_w = frame.shape[:2]
-            scale_x = frame_w / input_w
-            scale_y = frame_h / input_h
+                # Handle bbox normalization based on model intrinsics
+                bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
+                if bbox_normalization:
+                    boxes = boxes / input_h
 
-            for box, score, cls_id in zip(boxes, scores, classes):
-                x1, y1, x2, y2 = box
-                # Scale coordinates to frame size
-                x1 = int(x1 * scale_x)
-                y1 = int(y1 * scale_y)
-                x2 = int(x2 * scale_x)
-                y2 = int(y2 * scale_y)
+                # Handle bbox order (xy vs yx) - YOLOv8 uses xy
+                bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
+                if bbox_order == "xy":
+                    boxes = boxes[:, [1, 0, 3, 2]]
 
-                label = self.labels[int(cls_id)] if int(cls_id) < len(self.labels) else f"class_{cls_id}"
+                boxes = np.array_split(boxes, 4, axis=1)
+                boxes = list(zip(*boxes))
+
+            # Get picam2 reference for coordinate conversion
+            picam2 = getattr(self, '_picam2', None)
+
+            # Convert detections
+            for box, score, category in zip(boxes, scores, classes):
+                if score < self.confidence_threshold:
+                    continue
+
+                cls_id = int(category)
+                label = self.labels[cls_id] if cls_id < len(self.labels) else f"class_{cls_id}"
+
+                # Use official convert_inference_coords if picam2 is available
+                if picam2 is not None:
+                    try:
+                        x, y, w, h = self.imx500.convert_inference_coords(box, metadata, picam2)
+                        detections.append({
+                            'label': label,
+                            'confidence': float(score),
+                            'bbox': {
+                                'x': int(x),
+                                'y': int(y),
+                                'width': int(w),
+                                'height': int(h)
+                            }
+                        })
+                        continue
+                    except Exception:
+                        pass  # Fall back to manual conversion
+
+                # Manual coordinate conversion (fallback)
+                frame_h, frame_w = frame.shape[:2]
+                if isinstance(box, (list, tuple)) and len(box) == 4:
+                    y1, x1, y2, x2 = [float(b) for b in box]
+                else:
+                    y1, x1, y2, x2 = box.flatten()
 
                 detections.append({
                     'label': label,
                     'confidence': float(score),
                     'bbox': {
-                        'x': x1,
-                        'y': y1,
-                        'width': x2 - x1,
-                        'height': y2 - y1
+                        'x': int(x1 * frame_w),
+                        'y': int(y1 * frame_h),
+                        'width': int((x2 - x1) * frame_w),
+                        'height': int((y2 - y1) * frame_h)
                     }
                 })
 
-        except (ValueError, IndexError, TypeError) as e:
-            # Handle expected errors during detection parsing
-            print(f"[Detector] Detection parse error: {e}")
         except Exception as e:
-            # Log unexpected errors
-            print(f"[Detector] Unexpected error: {e}")
+            if not getattr(self, '_warned_detection_error', False):
+                print(f"[Detector] Detection error: {e}")
+                self._warned_detection_error = True
 
         return detections
 
@@ -187,9 +241,20 @@ class ObjectDetector:
         """
         self._last_metadata = metadata
 
+    def set_picam2(self, picam2):
+        """
+        Set the Picamera2 instance for coordinate conversion.
+        This enables using imx500.convert_inference_coords() for accurate bbox mapping.
+        """
+        self._picam2 = picam2
+
     def get_imx500(self):
         """Return the IMX500 instance for camera configuration"""
         return getattr(self, 'imx500', None)
+
+    def get_intrinsics(self):
+        """Return the NetworkIntrinsics for model configuration"""
+        return getattr(self, 'intrinsics', None)
 
     def _detect_yolov5(self, frame: np.ndarray) -> List[Dict]:
         """Detect using YOLOv5"""
@@ -215,7 +280,7 @@ class ObjectDetector:
         """Detect using MediaPipe"""
         import mediapipe as mp
 
-        # Convert BGR to RGB if needed
+        # Convert BGR to RGB if needed (MediaPipe expects RGB)
         if len(frame.shape) == 3 and frame.shape[2] == 3:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         else:
