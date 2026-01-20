@@ -13,8 +13,8 @@ from functools import lru_cache
 class ObjectDetector:
     """Object detector with IMX500 hardware acceleration using official picamera2 API"""
 
-    # Default to YOLO11 for latest accuracy
-    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
+    # Default to YOLOv8 for proven performance
+    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
 
     def __init__(self, backend='imx500', model_path=None, confidence_threshold=0.3):
         self.backend = backend
@@ -145,6 +145,13 @@ class ObjectDetector:
             if metadata is None:
                 return detections
 
+            # Validate metadata is a dict (picamera2 metadata format)
+            if not isinstance(metadata, dict):
+                if not getattr(self, '_warned_metadata_type', False):
+                    print(f"[Detector] Warning: metadata is {type(metadata).__name__}, expected dict")
+                    self._warned_metadata_type = True
+                return detections
+
             # Get outputs with batch dimension added
             np_outputs = self.imx500.get_outputs(metadata, add_batch=True)
             if np_outputs is None:
@@ -206,8 +213,11 @@ class ObjectDetector:
                             }
                         })
                         continue
-                    except Exception:
-                        pass  # Fall back to manual conversion
+                    except (ValueError, TypeError, IndexError) as e:
+                        # Log first coordinate conversion failure, then fall back silently
+                        if not getattr(self, '_warned_coord_convert', False):
+                            print(f"[Detector] Coordinate conversion failed: {e}, using fallback")
+                            self._warned_coord_convert = True
 
                 # Manual coordinate conversion (fallback)
                 frame_h, frame_w = frame.shape[:2]
@@ -215,6 +225,12 @@ class ObjectDetector:
                     y1, x1, y2, x2 = [float(b) for b in box]
                 else:
                     y1, x1, y2, x2 = box.flatten()
+
+                # Clamp normalized coordinates to valid range [0, 1]
+                y1 = max(0.0, min(1.0, y1))
+                x1 = max(0.0, min(1.0, x1))
+                y2 = max(0.0, min(1.0, y2))
+                x2 = max(0.0, min(1.0, x2))
 
                 detections.append({
                     'label': label,
@@ -227,10 +243,14 @@ class ObjectDetector:
                     }
                 })
 
-        except Exception as e:
+        except (ValueError, TypeError, IndexError, KeyError) as e:
+            # Log specific errors that indicate data format issues
             if not getattr(self, '_warned_detection_error', False):
-                print(f"[Detector] Detection error: {e}")
+                print(f"[Detector] Detection parsing error: {e}")
                 self._warned_detection_error = True
+        except Exception as e:
+            # Log unexpected errors with full details for debugging
+            print(f"[Detector] Unexpected detection error: {type(e).__name__}: {e}")
 
         return detections
 
@@ -238,14 +258,30 @@ class ObjectDetector:
         """
         Set the latest camera metadata containing IMX500 inference results.
         Call this after each frame capture from picamera2.
+
+        Args:
+            metadata: dict from picam2.capture_metadata() or request.get_metadata()
         """
+        # Accept None (clears metadata) or dict (picamera2 metadata format)
+        if metadata is not None and not isinstance(metadata, dict):
+            if not getattr(self, '_warned_set_metadata', False):
+                print(f"[Detector] Warning: set_metadata expects dict, got {type(metadata).__name__}")
+                self._warned_set_metadata = True
+            return
         self._last_metadata = metadata
 
     def set_picam2(self, picam2):
         """
         Set the Picamera2 instance for coordinate conversion.
         This enables using imx500.convert_inference_coords() for accurate bbox mapping.
+
+        Args:
+            picam2: Picamera2 instance (must have camera_configuration attribute)
         """
+        # Validate it looks like a Picamera2 instance
+        if picam2 is not None and not hasattr(picam2, 'camera_configuration'):
+            print(f"[Detector] Warning: set_picam2 expects Picamera2 instance, got {type(picam2).__name__}")
+            return
         self._picam2 = picam2
 
     def get_imx500(self):
@@ -255,6 +291,37 @@ class ObjectDetector:
     def get_intrinsics(self):
         """Return the NetworkIntrinsics for model configuration"""
         return getattr(self, 'intrinsics', None)
+
+    def stop(self):
+        """
+        Clean up detector resources.
+        Call this when shutting down to release IMX500 and other backend resources.
+        """
+        # Clear references to allow garbage collection
+        self._last_metadata = None
+        self._picam2 = None
+
+        # Reset warning flags for potential reuse
+        for attr in ['_warned_detection_error', '_warned_metadata_type',
+                     '_warned_coord_convert', '_warned_set_metadata']:
+            if hasattr(self, attr):
+                delattr(self, attr)
+
+        if self.backend == 'imx500':
+            # IMX500 doesn't have explicit cleanup - it's tied to Picamera2 lifecycle
+            self.imx500 = None
+            self.intrinsics = None
+            print("[Detector] IMX500 resources released")
+        elif self.backend == 'yolov5':
+            self.model = None
+            print("[Detector] YOLOv5 model released")
+        elif self.backend == 'mediapipe':
+            if hasattr(self, 'detector'):
+                self.detector.close()
+                self.detector = None
+            print("[Detector] MediaPipe detector closed")
+
+        print("[Detector] Stopped")
 
     def _detect_yolov5(self, frame: np.ndarray) -> List[Dict]:
         """Detect using YOLOv5"""

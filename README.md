@@ -1,14 +1,16 @@
 # OmniAI - Raspberry Pi AI Robot Control System
 
-AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLOv8 hardware-accelerated detection**, local LLM (Ollama), and real-time object detection.
+AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLOv8 hardware-accelerated detection**, cloud LLM (Groq), and real-time object detection.
 
 ## Features
 
 - **Hardware-Accelerated AI**: YOLOv8 runs directly on the IMX500 camera chip (~17ms inference, ~30fps)
 - **Real-time Object Detection**: 80 COCO classes including people, animals, vehicles, household items
-- **Local LLM Integration**: Ollama-powered command generation (Mistral, Phi, TinyLlama)
+- **Cloud LLM Integration**: Groq-powered command generation (Llama 3.1 8B) - fast and free tier available
+- **Local LLM Fallback**: Optional Ollama support (Mistral, Phi, TinyLlama)
 - **Tomy Omnibot Control**: Audio frequency-based robot control
 - **Web Dashboard**: Live MJPEG stream with detection overlays and controls
+- **Thread-Safe Camera**: Robust multi-threaded capture with proper resource management
 
 ## Hardware Requirements
 
@@ -56,7 +58,11 @@ source venv/bin/activate
 # Install dependencies
 pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice
 
-# Install Ollama for LLM
+# Set up Groq API key (recommended - fast cloud LLM)
+echo "GROQ_API_KEY=your_api_key_here" > .env
+# Get free API key at https://console.groq.com
+
+# OR install Ollama for local LLM (optional)
 curl https://ollama.ai/install.sh | sh
 ollama pull mistral
 ```
@@ -108,12 +114,13 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 omniai/
 ├── dashboard.py          # Web dashboard with live stream + robot control
 ├── test_detection.py     # Standalone detection test (YOLOv8)
-├── camera_capture.py     # Threaded camera capture with IMX500 support
+├── camera_capture.py     # Thread-safe camera capture with IMX500 support
 ├── object_detector.py    # Multi-backend detection (IMX500 YOLOv8 default)
-├── llm_command_generator.py  # Ollama LLM integration
+├── llm_command_generator.py  # Cloud (Groq) + local (Ollama) LLM integration
 ├── robot_executor.py     # Robot command executor (audio tones)
 ├── audio_commander.py    # Audio frequency generator for Tomy Omnibot
 ├── start.sh              # Quick start script
+├── .env                  # API keys (GROQ_API_KEY)
 ├── CLAUDE.md             # Technical reference for Claude Code
 └── README.md             # This file
 ```
@@ -164,20 +171,36 @@ Connect the Pi's audio output to the Omnibot's cassette input (via audio jack or
 | `/api/command` | POST | Send robot command |
 | `/api/task` | POST | Set LLM task context |
 
-## LLM Models for Pi 5
+## LLM Options
 
-| Model | Size | Speed | Quality |
-|-------|------|-------|---------|
-| `mistral` | 4.1GB | Good | **Best** |
-| `phi` | 1.6GB | Faster | Good |
-| `tinyllama` | 637MB | **Fastest** | Basic |
+### Cloud LLM (Recommended): Groq
+
+Groq provides fast, free-tier access to Llama 3.1 8B - much faster than running locally on Pi.
 
 ```bash
-# Pull alternative model
-ollama pull phi
+# Set up API key
+echo "GROQ_API_KEY=your_key_here" > .env
+# Get free key at https://console.groq.com
+```
 
-# Use with dashboard
-python dashboard.py --llm-model phi
+| Model | Provider | Latency | Quality |
+|-------|----------|---------|---------|
+| `llama-3.1-8b-instant` | Groq | **~100ms** | **Best** |
+| `mistral` | Ollama (local) | ~2-5s | Good |
+| `phi` | Ollama (local) | ~1-3s | Good |
+| `tinyllama` | Ollama (local) | ~500ms | Basic |
+
+### Local LLM (Optional): Ollama
+
+For offline operation or privacy:
+
+```bash
+# Install Ollama
+curl https://ollama.ai/install.sh | sh
+ollama pull mistral
+
+# Use local LLM (set use_cloud=False in code)
+python dashboard.py --llm-model mistral
 ```
 
 ## Troubleshooting

@@ -199,7 +199,26 @@ keyboard, cell phone, microwave, oven, toaster, sink, refrigerator,
 book, clock, vase, scissors, teddy bear, hair drier, toothbrush
 ```
 
-## Ollama Setup (Local LLM)
+## Cloud LLM Setup (Recommended): Groq
+
+Groq provides fast, free-tier access to Llama 3.1 8B - much faster than local inference on Pi.
+
+```bash
+# Set API key in .env file
+echo "GROQ_API_KEY=your_api_key_here" > .env
+
+# Get free API key at https://console.groq.com
+```
+
+### Groq API Details
+- **Endpoint**: `https://api.groq.com/openai/v1/chat/completions`
+- **Model**: `llama-3.1-8b-instant` (fast, good quality)
+- **Latency**: ~100ms (vs 2-5s for local Ollama)
+- **Free tier**: Available with rate limits
+
+## Local LLM Setup (Optional): Ollama
+
+For offline operation or when cloud isn't available:
 
 ```bash
 # Install
@@ -215,7 +234,7 @@ ollama run mistral "Say hello"
 curl http://localhost:11434/api/tags
 ```
 
-### Recommended Models for Pi 5 (16GB)
+### Recommended Local Models for Pi 5 (16GB)
 - `mistral` - 4.1GB, best quality
 - `phi` - 1.6GB, faster
 - `tinyllama` - 637MB, fastest
@@ -322,12 +341,28 @@ frame, metadata = camera.get_frame_and_metadata()
 ```python
 from llm_command_generator import LLMCommandGenerator
 
-# Supports configurable frame dimensions (default 640x480)
+# Cloud LLM (default - uses GROQ_API_KEY from .env)
+llm = LLMCommandGenerator(
+    model_name='llama-3.1-8b-instant',  # Default Groq model
+    use_cloud=True,                      # Default - uses Groq
+    cloud_provider='groq',               # Default
+    frame_width=640,                     # Used for left/right positioning
+    frame_height=480                     # Used for top/bottom positioning
+)
+
+# Local LLM (Ollama) - set use_cloud=False
 llm = LLMCommandGenerator(
     model_name='mistral',
-    frame_width=640,   # Used for left/right positioning
-    frame_height=480   # Used for top/bottom positioning
+    use_cloud=False,
+    api_url='http://localhost:11434'
 )
+
+# Generate commands from detections
+commands = llm.generate_commands(detections, context="Find and approach people")
+
+# Access debug info (prompt, response, parsed commands)
+debug = llm.last_debug
+print(f"Mode: {debug['mode']}, Commands: {debug['parsed_commands']}")
 ```
 
 ### RobotCommandExecutor
@@ -377,6 +412,40 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclud
 - `espeak` called with `--` to prevent option injection
 - API endpoints validate `request.json` (handles None case)
 - Camera metadata copied by value (not reference) for thread safety
+
+## Thread Safety Notes
+
+### CameraCapture Thread Safety
+The camera runs in a background thread. Critical patterns:
+
+```python
+# CORRECT - Returns a copy to prevent race conditions
+def get_frame(self):
+    with self.frame_lock:
+        if self.current_frame is None:
+            return None
+        return self.current_frame.copy()  # MUST copy!
+
+# WRONG - Returns reference, caller could see partial data
+def get_frame(self):
+    with self.frame_lock:
+        return self.current_frame  # Race condition!
+```
+
+### Resource Management
+- `capture_request()` MUST be followed by `release()` in a finally block
+- `stop()` handles stuck threads by force-stopping the camera first
+- Input validation prevents invalid resolution/framerate values
+
+### CameraCapture Validation
+```python
+# Resolution must be (width, height) tuple of positive integers
+# Framerate must be positive number, clamped to 1-120 fps
+camera = CameraCapture(
+    resolution=(640, 480),  # Validated: tuple of 2 positive ints
+    framerate=30            # Validated: positive, clamped 1-120
+)
+```
 
 ## IMX500 Resources
 - Official Docs: https://www.raspberrypi.com/documentation/accessories/ai-camera.html

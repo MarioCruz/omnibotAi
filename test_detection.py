@@ -61,6 +61,10 @@ detection_history = []
 inference_time_ms = 0
 running = True
 
+# Cached MJPEG bytes (encode once, share with all clients)
+mjpeg_lock = threading.Lock()
+cached_mjpeg_bytes = None
+
 app = Flask(__name__)
 
 
@@ -138,6 +142,9 @@ def draw_detections(request, stream="main"):
     labels = get_labels()
 
     with MappedArray(request, stream) as m:
+        # Create overlay copy ONCE before the loop (not per-detection)
+        overlay = m.array.copy()
+
         for detection in detections:
             x, y, w, h = detection.box
             x, y, w, h = int(x), int(y), int(w), int(h)
@@ -151,14 +158,12 @@ def draw_detections(request, stream="main"):
             text_x = x + 5
             text_y = y + 15
 
-            # Semi-transparent background
-            overlay = m.array.copy()
+            # Semi-transparent background on overlay
             cv2.rectangle(overlay,
                           (text_x, text_y - text_height - 2),
                           (text_x + text_width + 2, text_y + baseline + 2),
                           (255, 255, 255),
                           cv2.FILLED)
-            cv2.addWeighted(overlay, 0.3, m.array, 0.7, 0, m.array)
 
             # Draw label text
             cv2.putText(m.array, label_text, (text_x, text_y),
@@ -166,6 +171,9 @@ def draw_detections(request, stream="main"):
 
             # Draw bounding box
             cv2.rectangle(m.array, (x, y), (x + w, y + h), (0, 255, 0), thickness=2)
+
+        # Blend overlay with original once after all detections drawn
+        cv2.addWeighted(overlay, 0.3, m.array, 0.7, 0, m.array)
 
 
 def capture_loop():
@@ -244,9 +252,9 @@ def capture_loop():
             time.sleep(0.1)
 
 
-def generate_mjpeg():
-    """Generate MJPEG stream for web viewer."""
-    global current_frame, running
+def mjpeg_encoder_loop():
+    """Background thread that encodes JPEG once for all clients."""
+    global cached_mjpeg_bytes, running
 
     while running:
         with frame_lock:
@@ -254,13 +262,29 @@ def generate_mjpeg():
 
         if frame is not None:
             try:
-                # Convert RGB to BGR for JPEG encoding
+                # Convert RGB to BGR and encode as JPEG once
                 _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
                                        [cv2.IMWRITE_JPEG_QUALITY, 85])
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                frame_bytes = (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                with mjpeg_lock:
+                    cached_mjpeg_bytes = frame_bytes
             except:
                 pass
+
+        time.sleep(0.033)
+
+
+def generate_mjpeg():
+    """Generate MJPEG stream for web viewer (uses cached bytes)."""
+    global running
+
+    while running:
+        with mjpeg_lock:
+            frame_bytes = cached_mjpeg_bytes
+
+        if frame_bytes is not None:
+            yield frame_bytes
 
         time.sleep(0.033)
 
@@ -483,6 +507,10 @@ def main():
     # Start capture thread
     capture_thread = threading.Thread(target=capture_loop, daemon=True)
     capture_thread.start()
+
+    # Start MJPEG encoder thread (encodes once, shared by all clients)
+    encoder_thread = threading.Thread(target=mjpeg_encoder_loop, daemon=True)
+    encoder_thread.start()
 
     # Generate self-signed SSL cert if needed
     cert_file = '/tmp/test_cert.pem'

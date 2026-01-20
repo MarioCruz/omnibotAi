@@ -8,11 +8,26 @@ import io
 import json
 import threading
 import time
+import os
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template_string, jsonify, request
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
+
+# Load environment variables from .env file
+def load_env():
+    env_path = os.path.join(os.path.dirname(__file__), '.env')
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+                    print(f"[Env] Loaded {key.strip()}")
+
+load_env()
 
 # Import our modules
 from camera_capture import CameraCapture
@@ -29,7 +44,7 @@ system_state = {
     'running': False,
     'paused': False,
     'shutdown': False,  # Flag for graceful shutdown
-    'task': 'Explore and interact with objects',
+    'task': None,  # No task by default - must select a mission to enable autonomous mode
     'use_llm': True,
     'detections': [],
     'last_commands': [],
@@ -49,6 +64,10 @@ robot = None
 frame_lock = threading.Lock()
 current_frame = None
 annotated_frame = None
+
+# Cached MJPEG bytes (encode once, share with all clients)
+mjpeg_lock = threading.Lock()
+cached_mjpeg_bytes = None
 
 
 def init_system(detector_backend='imx500', llm_model='mistral', volume=0.5):
@@ -128,26 +147,29 @@ def process_loop():
             with frame_lock:
                 annotated_frame = annotated
 
-            # Generate commands
-            if system_state['use_llm'] and llm:
-                commands = llm.generate_commands(
-                    detections,
-                    context=system_state['task'],
-                    use_llm=system_state['use_llm']
-                )
-            else:
-                commands = llm.generate_commands(detections, use_llm=False) if llm else []
+            # Generate and execute commands ONLY if a mission/task has been set
+            commands = []
+            if system_state['task'] and llm:
+                # Generate commands based on task
+                if system_state['use_llm']:
+                    commands = llm.generate_commands(
+                        detections,
+                        context=system_state['task'],
+                        use_llm=True
+                    )
+                else:
+                    commands = llm.generate_commands(detections, use_llm=False)
 
-            # Only keep last 20 commands to prevent unbounded memory growth
+                # Execute commands
+                if commands and robot and robot.connected:
+                    for cmd in commands[:3]:  # Limit to 3 commands per cycle
+                        robot.execute(cmd)
+
+            # Update stats
             system_state['last_commands'] = commands[:20]
             system_state['stats']['total_commands'] += len(commands)
             system_state['stats']['iterations'] += 1
             system_state['stats']['fps'] = camera.get_fps()
-
-            # Execute commands
-            if commands and robot and robot.connected:
-                for cmd in commands[:3]:  # Limit to 3 commands per cycle
-                    robot.execute(cmd)
 
             # Emit update via WebSocket (include LLM debug info)
             llm_debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
@@ -188,26 +210,43 @@ def draw_detections(frame, detections):
         cv2.putText(annotated, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
     # Draw status overlay
-    status = f"Detections: {len(detections)} | Task: {system_state['task'][:30]}"
+    task_text = system_state['task'][:30] if system_state['task'] else 'None'
+    status = f"Detections: {len(detections)} | Task: {task_text}"
     cv2.putText(annotated, status, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
 
     return annotated
 
 
-def generate_mjpeg():
-    """Generate MJPEG stream with detection overlays"""
+def mjpeg_encoder_loop():
+    """Background thread that encodes JPEG once for all clients."""
+    global cached_mjpeg_bytes
+
     while not system_state['shutdown']:
         with frame_lock:
             frame = annotated_frame if annotated_frame is not None else current_frame
 
         if frame is not None:
             try:
-                # Encode as JPEG
+                # Encode as JPEG once
                 _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                frame_bytes = (b'--frame\r\n'
+                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                with mjpeg_lock:
+                    cached_mjpeg_bytes = frame_bytes
             except Exception:
-                pass  # Client disconnected or encoding error
+                pass
+
+        time.sleep(0.033)  # ~30 FPS
+
+
+def generate_mjpeg():
+    """Generate MJPEG stream with detection overlays (uses cached bytes)."""
+    while not system_state['shutdown']:
+        with mjpeg_lock:
+            frame_bytes = cached_mjpeg_bytes
+
+        if frame_bytes is not None:
+            yield frame_bytes
 
         time.sleep(0.033)  # ~30 FPS
 
@@ -510,8 +549,8 @@ DASHBOARD_HTML = """
             </div>
 
             <div class="panel" style="margin-top: 20px;">
-                <h2>Detections</h2>
-                <div class="detections" id="detectionsList">
+                <h2>Detection History</h2>
+                <div class="log" id="detectionsList" style="max-height: 200px; overflow-y: auto;">
                     <div style="color: #666; text-align: center; padding: 20px;">No detections yet</div>
                 </div>
             </div>
@@ -542,6 +581,28 @@ DASHBOARD_HTML = """
 
     <script>
         const socket = io();
+        let detectionHistory = [];
+        const MAX_DETECTION_HISTORY = 50;
+
+        function logDetection(detections) {
+            if (detections.length === 0) return;
+
+            const timestamp = new Date().toLocaleTimeString();
+            const summary = detections.map(d => `${d.label} (${(d.confidence * 100).toFixed(0)}%)`).join(', ');
+
+            detectionHistory.unshift({ timestamp, summary, count: detections.length });
+            if (detectionHistory.length > MAX_DETECTION_HISTORY) {
+                detectionHistory.pop();
+            }
+
+            const detList = document.getElementById('detectionsList');
+            detList.innerHTML = detectionHistory.map(h => `
+                <div class="log-entry info">
+                    <span style="color: #888;">[${h.timestamp}]</span>
+                    <span style="color: #00ff88;">${h.count}x</span> ${h.summary}
+                </div>
+            `).join('');
+        }
 
         socket.on('connect', () => {
             log('Connected to server', 'success');
@@ -560,18 +621,8 @@ DASHBOARD_HTML = """
             document.getElementById('statDetections').textContent = data.stats.total_detections;
             document.getElementById('statCommands').textContent = data.stats.total_commands;
 
-            // Update detections
-            const detList = document.getElementById('detectionsList');
-            if (data.detections.length > 0) {
-                detList.innerHTML = data.detections.map(d => `
-                    <div class="detection-item">
-                        <span class="label">${d.label}</span>
-                        <span class="confidence">${(d.confidence * 100).toFixed(0)}%</span>
-                    </div>
-                `).join('');
-            } else {
-                detList.innerHTML = '<div style="color: #666; text-align: center; padding: 10px;">No objects detected</div>';
-            }
+            // Log detections to history
+            logDetection(data.detections);
 
             // Update commands
             const cmdList = document.getElementById('commandsList');
@@ -1399,6 +1450,7 @@ def api_start():
 @app.route('/api/stop', methods=['POST'])
 def api_stop():
     system_state['running'] = False
+    system_state['task'] = None  # Clear task to stop autonomous commands
     if robot:
         robot.stop()
     return jsonify({'status': 'stopped'})
@@ -1478,6 +1530,10 @@ if __name__ == '__main__':
     # Start processing thread
     process_thread = threading.Thread(target=process_loop, daemon=True)
     process_thread.start()
+
+    # Start MJPEG encoder thread (encodes once, shared by all clients)
+    encoder_thread = threading.Thread(target=mjpeg_encoder_loop, daemon=True)
+    encoder_thread.start()
 
     # Register signal handlers for graceful shutdown
     def signal_handler(sig, frame):

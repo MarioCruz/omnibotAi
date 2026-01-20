@@ -17,11 +17,25 @@ class CameraCapture:
         Initialize camera capture.
 
         Args:
-            resolution: Tuple of (width, height)
-            framerate: Target frames per second
+            resolution: Tuple of (width, height) - must be positive integers
+            framerate: Target frames per second (1-120)
             imx500: Optional IMX500 instance for AI camera configuration
             intrinsics: Optional NetworkIntrinsics for model-specific settings
         """
+        # Validate resolution
+        if not isinstance(resolution, (tuple, list)) or len(resolution) != 2:
+            raise ValueError(f"resolution must be (width, height) tuple, got {resolution}")
+        width, height = resolution
+        if not isinstance(width, int) or not isinstance(height, int):
+            raise ValueError(f"resolution values must be integers, got ({type(width).__name__}, {type(height).__name__})")
+        if width <= 0 or height <= 0:
+            raise ValueError(f"resolution must be positive, got {resolution}")
+
+        # Validate framerate
+        if not isinstance(framerate, (int, float)) or framerate <= 0:
+            raise ValueError(f"framerate must be positive number, got {framerate}")
+        framerate = max(1, min(120, int(framerate)))  # Clamp to 1-120 fps
+
         # Use IMX500's camera_num if available
         if imx500 is not None:
             self.picam2 = Picamera2(imx500.camera_num)
@@ -34,6 +48,9 @@ class CameraCapture:
         # Use model's inference rate if available
         if intrinsics and hasattr(intrinsics, 'inference_rate') and intrinsics.inference_rate:
             framerate = intrinsics.inference_rate
+
+        # Store target framerate AFTER any intrinsics override
+        self.target_framerate = framerate
 
         # Configure camera with larger buffer for IMX500
         buffer_count = 12 if imx500 else 4
@@ -69,15 +86,19 @@ class CameraCapture:
     def _capture_loop(self):
         frames_this_second = 0
         last_fps_update = time.time()
+        frame_interval = 1.0 / self.target_framerate
 
         while self.running:
+            loop_start = time.time()
+            job = None
+
             try:
                 # Capture frame and metadata together
                 job = self.picam2.capture_request()
                 frame = job.make_array("main")
                 metadata = job.get_metadata()
-                job.release()
 
+                # Store data BEFORE releasing the request
                 with self.frame_lock:
                     self.current_frame = frame
                     self.current_metadata = metadata
@@ -96,21 +117,33 @@ class CameraCapture:
                 print(f"[Camera] Capture error: {e}")
                 time.sleep(0.1)
                 continue
+            finally:
+                # Always release the request if we got one
+                if job is not None:
+                    try:
+                        job.release()
+                    except Exception:
+                        pass
 
-            time.sleep(0.033)  # ~30 FPS
+            # Sleep for remaining time to hit target framerate
+            elapsed = time.time() - loop_start
+            sleep_time = frame_interval - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
     def get_frame(self):
-        """Get the current frame (thread-safe copy)"""
+        """Get the current frame (thread-safe copy to prevent race conditions)"""
         with self.frame_lock:
-            if self.current_frame is not None:
-                return self.current_frame.copy()
-            return None
+            if self.current_frame is None:
+                return None
+            return self.current_frame.copy()
 
     def get_frame_and_metadata(self):
-        """Get current frame and metadata (for IMX500 inference results)"""
+        """Get current frame and metadata (thread-safe copies for IMX500 inference results)"""
         with self.frame_lock:
             frame = self.current_frame.copy() if self.current_frame is not None else None
-            metadata = self.current_metadata
+            # Metadata is a dict - make a shallow copy to prevent mutation
+            metadata = dict(self.current_metadata) if self.current_metadata else None
             return frame, metadata
 
     def get_fps(self):
@@ -118,11 +151,32 @@ class CameraCapture:
         return self.fps
 
     def stop(self):
-        """Stop the camera capture"""
+        """Stop the camera capture and release resources"""
         self.running = False
         self.capture_thread.join(timeout=2.0)
-        self.picam2.stop()
-        print("[Camera] Stopped")
+
+        if self.capture_thread.is_alive():
+            # Thread is stuck - likely blocked on capture_request()
+            # Force stop picam2 first to unblock it, then try joining again
+            print("[Camera] Warning: capture thread blocked, forcing camera stop")
+            try:
+                self.picam2.stop()
+            except Exception as e:
+                print(f"[Camera] Error stopping camera: {e}")
+
+            # Give thread one more chance to exit
+            self.capture_thread.join(timeout=1.0)
+            if self.capture_thread.is_alive():
+                print("[Camera] Warning: capture thread did not stop - may leak resources")
+            else:
+                print("[Camera] Stopped (after force)")
+        else:
+            # Thread stopped cleanly, now stop camera
+            try:
+                self.picam2.stop()
+            except Exception as e:
+                print(f"[Camera] Error stopping camera: {e}")
+            print("[Camera] Stopped")
 
 
 # For testing

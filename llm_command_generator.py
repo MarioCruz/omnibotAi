@@ -8,6 +8,7 @@ import requests
 import json
 import re
 import time
+import os
 from typing import List, Dict, Optional
 
 
@@ -15,17 +16,19 @@ class LLMCommandGenerator:
     """Generate robot commands using LLM based on detected objects"""
 
     def __init__(self,
-                 model_name: str = "mistral",
+                 model_name: str = "llama-3.1-8b-instant",
                  api_url: str = "http://localhost:11434",
-                 use_cloud: bool = False,
+                 use_cloud: bool = True,
                  cloud_api_key: str = None,
+                 cloud_provider: str = "groq",
                  frame_width: int = 640,
                  frame_height: int = 480):
 
         self.model_name = model_name
         self.api_url = api_url
         self.use_cloud = use_cloud
-        self.cloud_api_key = cloud_api_key
+        self.cloud_api_key = cloud_api_key or os.environ.get('GROQ_API_KEY')
+        self.cloud_provider = cloud_provider
         self.frame_width = frame_width
         self.frame_height = frame_height
 
@@ -48,9 +51,9 @@ class LLMCommandGenerator:
             'greet': 'speakText("Hello!")',
         }
 
-        # Simple rule-based responses as fallback
+        # Simple rule-based responses as fallback (no speech - too slow)
         self.simple_rules = {
-            'person': ['greet'],
+            'person': ['forward'],  # Approach person (don't speak - blocks processing)
             'cat': ['forward', 'stop'],
             'dog': ['forward', 'stop'],
             'ball': ['forward', 'forward'],
@@ -69,7 +72,10 @@ class LLMCommandGenerator:
             'timestamp': ''
         }
 
-        print(f"[LLM] Initialized with model: {model_name}")
+        if self.use_cloud:
+            print(f"[LLM] Initialized with cloud ({cloud_provider}): {model_name}")
+        else:
+            print(f"[LLM] Initialized with local Ollama: {model_name}")
         print(f"[LLM] Available commands: {list(self.robot_commands.keys())}")
 
     def generate_commands(self,
@@ -235,11 +241,11 @@ Current view:
 Task: {context if context else 'Explore and interact with objects'}
 
 Rules:
-- Generate 1-4 commands maximum
-- If you see a person, greet them
+- Generate 1-3 movement commands only (no speech commands)
 - Move toward interesting objects
+- Turn left/right to center objects in view
 - Avoid obstacles by turning
-- If nothing interesting, patrol or search
+- If nothing interesting, search or patrol
 
 Respond with ONLY a JSON object:
 {{"commands": ["cmd1", "cmd2"]}}"""
@@ -272,10 +278,44 @@ Respond with ONLY a JSON object:
             raise
 
     def _call_cloud_llm(self, prompt: str) -> str:
-        """Call cloud LLM API (e.g., OpenAI, Anthropic)"""
-        # Placeholder for cloud LLM integration
-        # Implement based on your preferred provider
-        raise NotImplementedError("Cloud LLM not configured. Use Ollama or implement cloud API.")
+        """Call cloud LLM API (Groq, OpenAI compatible)"""
+        if not self.cloud_api_key:
+            raise ValueError("Cloud API key not set. Set GROQ_API_KEY environment variable.")
+
+        if self.cloud_provider == "groq":
+            return self._call_groq(prompt)
+        else:
+            raise NotImplementedError(f"Cloud provider {self.cloud_provider} not supported.")
+
+    def _call_groq(self, prompt: str) -> str:
+        """Call Groq API (OpenAI compatible)"""
+        try:
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.cloud_api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model_name,
+                    "messages": [
+                        {"role": "system", "content": "You are a robot control AI. Respond only with JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    "temperature": 0.3,
+                    "max_tokens": 100,
+                },
+                timeout=10
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result['choices'][0]['message']['content']
+        except requests.exceptions.Timeout:
+            print("[LLM] Groq timeout")
+            raise
+        except Exception as e:
+            print(f"[LLM] Groq error: {e}")
+            raise
 
     def _parse_response(self, response: str) -> List[str]:
         """Parse LLM response into validated commands"""
