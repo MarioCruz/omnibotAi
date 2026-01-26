@@ -262,8 +262,8 @@ def mjpeg_encoder_loop():
 
         if frame is not None:
             try:
-                # Convert RGB to BGR and encode as JPEG once
-                _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
+                # Encode as JPEG (picamera2 RGB888 is already BGR in memory)
+                _, jpeg = cv2.imencode('.jpg', frame,
                                        [cv2.IMWRITE_JPEG_QUALITY, 85])
                 frame_bytes = (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')

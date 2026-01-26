@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import wave
 import os
+import threading
 
 try:
     import sounddevice as sd
@@ -58,13 +59,18 @@ class AudioCommander:
         self.use_system_player = False
         self.system_player = None
 
-        # Try sounddevice first
-        if SOUNDDEVICE_AVAILABLE:
-            self._init_audio_device()
+        # Thread safety for speech processes
+        self._proc_lock = threading.Lock()
+        self._espeak_proc = None
+        self._pw_proc = None
+        self._stopping = False  # Flag to signal speech should stop
 
-        # If sounddevice didn't work, try system audio players (for PipeWire/PulseAudio/Bluetooth)
-        if not self.audio_available:
-            self._init_system_player()
+        # Try system player first (routes through PipeWire/PulseAudio for Bluetooth support)
+        self._init_system_player()
+
+        # Fall back to sounddevice if no system player available
+        if not self.audio_available and SOUNDDEVICE_AVAILABLE:
+            self._init_audio_device()
 
     def _init_audio_device(self):
         """Initialize and validate sounddevice audio output."""
@@ -256,10 +262,62 @@ class AudioCommander:
             except Exception:
                 pass
         self.is_playing = False
+        # Also kill any running speech and send speaker off
+        self.stop_speaking()
+
+    def stop_speaking(self):
+        """Kill any running speech and send speaker_off to reset robot."""
+        # Set stopping flag to signal speak() to abort
+        self._stopping = True
+
+        # Kill processes with lock protection
+        with self._proc_lock:
+            espeak = self._espeak_proc
+            pw = self._pw_proc
+            self._espeak_proc = None
+            self._pw_proc = None
+
+        # Kill outside lock to avoid deadlock
+        if espeak:
+            try:
+                espeak.kill()
+            except Exception:
+                pass
+        if pw:
+            try:
+                pw.kill()
+            except Exception:
+                pass
+
+        # Kill any espeak/pw-play that might be stuck (system-wide)
+        try:
+            subprocess.run(['pkill', '-f', 'espeak'], capture_output=True, timeout=1)
+            subprocess.run(['pkill', '-f', 'pw-play'], capture_output=True, timeout=1)
+        except Exception:
+            pass
+
+        # Small delay after killing processes
+        time.sleep(0.2)
+
+        # Reset stopping flag
+        self._stopping = False
+
+        # Send speaker_off using sox piped through pw-play (proven to work with Bluetooth)
+        try:
+            sox_cmd = ['sox', '-n', '-t', 'wav', '-', 'synth', '0.5', 'sine', str(self.FREQUENCIES['speaker_off'])]
+            pw_cmd = ['pw-play', '-']
+            sox_proc = subprocess.Popen(sox_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            pw_proc = subprocess.Popen(pw_cmd, stdin=sox_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            pw_proc.wait(timeout=3)
+            print("[AudioCommander] Speech stopped, speaker off sent via sox")
+        except Exception as e:
+            # Fallback to regular method
+            print(f"[AudioCommander] sox method failed ({e}), using fallback")
+            self.speaker_off(300)
 
     def speak(self, text: str):
         """
-        Speak text using espeak (with speaker on/off tones).
+        Speak text using the speak_pi.sh script (proven to work with Bluetooth).
 
         Args:
             text: Text to speak (sanitized to alphanumeric, spaces, and basic punctuation)
@@ -272,29 +330,69 @@ class AudioCommander:
             print("[AudioCommander] No valid text to speak after sanitization")
             return
 
-        # Turn speaker on (don't fail if audio unavailable - espeak might still work)
-        self.speaker_on(200)
-        time.sleep(0.1)
+        # Use speak_pi.sh script which is proven to work with Bluetooth
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'speak_pi.sh')
 
-        # Use espeak-ng (or espeak) - outputs to default audio via PipeWire
         try:
-            # Try espeak-ng first, fall back to espeak
-            try:
-                subprocess.run(['espeak-ng', '--', sanitized], timeout=10,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except FileNotFoundError:
-                subprocess.run(['espeak', '--', sanitized], timeout=10,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except FileNotFoundError:
-            print("[AudioCommander] espeak not found - install with: sudo apt install espeak-ng")
-        except subprocess.TimeoutExpired:
-            print("[AudioCommander] espeak timed out")
-        except Exception as e:
-            print(f"[AudioCommander] espeak error: {e}")
+            with self._proc_lock:
+                if self._stopping:
+                    return
+                self._espeak_proc = subprocess.Popen(
+                    ['bash', script_path, sanitized],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                proc = self._espeak_proc
 
-        time.sleep(0.1)
-        # Turn speaker off
-        self.speaker_off(200)
+            if proc:
+                try:
+                    proc.wait(timeout=30)
+                except subprocess.TimeoutExpired:
+                    print("[AudioCommander] speak script timed out")
+                    proc.kill()
+
+            with self._proc_lock:
+                self._espeak_proc = None
+
+        except FileNotFoundError:
+            print(f"[AudioCommander] speak_pi.sh not found at {script_path}")
+        except Exception as e:
+            print(f"[AudioCommander] speak error: {e}")
+
+    def speak_phrase(self, phrase: str):
+        """
+        Play a pre-recorded phrase (faster than generating speech).
+
+        Args:
+            phrase: Phrase name (hello, yes, no, thanks, omnibot)
+        """
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'speak_phrase.sh')
+
+        try:
+            with self._proc_lock:
+                if self._stopping:
+                    return
+                self._espeak_proc = subprocess.Popen(
+                    ['bash', script_path, phrase],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                proc = self._espeak_proc
+
+            if proc:
+                try:
+                    proc.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    print("[AudioCommander] speak_phrase timed out")
+                    proc.kill()
+
+            with self._proc_lock:
+                self._espeak_proc = None
+
+        except FileNotFoundError:
+            print(f"[AudioCommander] speak_phrase.sh not found at {script_path}")
+        except Exception as e:
+            print(f"[AudioCommander] speak_phrase error: {e}")
 
 
 # For testing

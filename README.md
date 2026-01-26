@@ -112,17 +112,26 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 
 ```
 omniai/
-├── dashboard.py          # Web dashboard with live stream + robot control
-├── test_detection.py     # Standalone detection test (YOLOv8)
-├── camera_capture.py     # Thread-safe camera capture with IMX500 support
-├── object_detector.py    # Multi-backend detection (IMX500 YOLOv8 default)
+├── dashboard.py              # Web dashboard with live stream + robot control
+├── test_detection.py         # Standalone detection test (YOLOv8)
+├── camera_capture.py         # Thread-safe camera capture with IMX500 support
+├── object_detector.py        # Multi-backend detection (IMX500 YOLOv8 default)
 ├── llm_command_generator.py  # Cloud (Groq) + local (Ollama) LLM integration
-├── robot_executor.py     # Robot command executor (audio tones)
-├── audio_commander.py    # Audio frequency generator for Tomy Omnibot
-├── start.sh              # Quick start script
-├── .env                  # API keys (GROQ_API_KEY)
-├── CLAUDE.md             # Technical reference for Claude Code
-└── README.md             # This file
+├── robot_executor.py         # Robot command executor (audio tones + speech)
+├── audio_commander.py        # Audio frequency generator + speech (thread-safe)
+├── speak_pi.sh               # Text-to-speech script (Pi - espeak + pw-play)
+├── speak_phrase.sh           # Pre-recorded phrase player (Pi)
+├── audio_phrases/            # Pre-recorded WAV files for fast speech
+│   ├── hello.wav
+│   ├── yes.wav
+│   ├── no.wav
+│   ├── thanks.wav
+│   └── omnibot.wav
+├── speak.sh                  # Text-to-speech script (macOS - for testing)
+├── start.sh                  # Quick start script
+├── .env                      # API keys (GROQ_API_KEY)
+├── CLAUDE.md                 # Technical reference for Claude Code
+└── README.md                 # This file
 ```
 
 ## Detection Models
@@ -149,20 +158,65 @@ The robot is controlled via audio frequency tones:
 
 Connect the Pi's audio output to the Omnibot's cassette input (via audio jack or Bluetooth).
 
+## Speech Features
+
+The robot can speak using text-to-speech or pre-recorded phrases.
+
+### Pre-recorded Phrases (Fast)
+Pre-generated WAV files for instant playback:
+| Phrase | Description |
+|--------|-------------|
+| `hello` | "Hello" greeting |
+| `yes` | "Yes" affirmative |
+| `no` | "No" negative |
+| `thanks` | "Thank you" |
+| `omnibot` | "Hello, I am Omnibot" intro |
+
+### Text-to-Speech (Flexible)
+Any text can be spoken via espeak-ng (slower than pre-recorded).
+
+### Speech Sequence
+1. **Speaker On tone** (1422 Hz) - Enables robot's speaker relay
+2. **Audio playback** - Speech or WAV file via Bluetooth
+3. **Speaker Off tone** (4650 Hz) - Disables relay, stops audio
+
+### Bluetooth Audio Setup
+The Pi sends audio via Bluetooth to the robot's speaker:
+```bash
+# Pair Bluetooth speaker/robot
+bluetoothctl
+> scan on
+> pair XX:XX:XX:XX:XX:XX
+> trust XX:XX:XX:XX:XX:XX
+> connect XX:XX:XX:XX:XX:XX
+```
+
 ## Dashboard Features
 
+### Main Dashboard (`/`)
 - **Live Camera Stream**: MJPEG with detection bounding boxes
 - **Object Detection Panel**: Real-time list of detected objects
 - **Detection History**: Log of all detections with timestamps
 - **Manual Robot Controls**: Movement buttons, patterns, speech
+- **Speech Buttons**: Hello, Yes, No, Thanks (pre-recorded phrases)
+- **Speaker Off Button**: 🔇 Kills speech and resets robot speaker
 - **Statistics**: FPS, inference time, detection count
-- **Task Setting**: Configure LLM behavior context
+- **LLM Debug Panel**: Shows prompts and AI responses
+- **Bluetooth Status**: Connection indicator
+
+### Kids Dashboard (`/kids`)
+- **Simplified Interface**: Large, colorful buttons for children
+- **Mission Buttons**: Find Shoes, Find Person, Explore, Dance
+- **Big Direction Controls**: Emoji arrows (⬆️ ⬇️ ⬅️ ➡️)
+- **Say Hello**: Plays "Hello, I am Omnibot" greeting
+- **Quiet Button**: 🔇 Speaker off for kids
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Dashboard UI |
+| `/` | GET | Main dashboard UI |
+| `/kids` | GET | Kid-friendly dashboard |
 | `/stream` | GET | MJPEG video stream |
 | `/api/detections` | GET | Current detections JSON |
 | `/api/history` | GET | Detection history |
@@ -170,6 +224,30 @@ Connect the Pi's audio output to the Omnibot's cassette input (via audio jack or
 | `/api/stop` | POST | Stop AI system |
 | `/api/command` | POST | Send robot command |
 | `/api/task` | POST | Set LLM task context |
+| `/api/bluetooth` | GET | Bluetooth connection status |
+
+### Robot Commands via `/api/command`
+```json
+// Movement
+{"command": "forward"}
+{"command": "backward"}
+{"command": "left"}
+{"command": "right"}
+{"command": "stop"}
+
+// Patterns
+{"command": "dance"}
+{"command": "circle"}
+
+// Speech (text-to-speech)
+{"command": "speakText(\"Hello world\")"}
+
+// Speech (pre-recorded - faster)
+{"command": "phrase(\"hello\")"}
+
+// Speaker control
+{"command": "speaker_off"}
+```
 
 ## LLM Options
 

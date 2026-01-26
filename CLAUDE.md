@@ -255,9 +255,61 @@ stop       # Stops tone
 dance, circle, square, triangle, zigzag, spiral, search, patrol
 ```
 
-### Speech
+### Speech Commands
 ```python
-speakText("Hello!")  # Uses espeak + speaker on/off tones
+speakText("Hello!")   # Text-to-speech via espeak (slower, any text)
+phrase("hello")       # Pre-recorded phrase (faster, limited options)
+speaker_off           # Kill speech and reset robot speaker relay
+```
+
+### Pre-recorded Phrases
+Located in `audio_phrases/` directory. Much faster than text-to-speech:
+| Phrase | File | Use Case |
+|--------|------|----------|
+| `hello` | hello.wav | Greeting |
+| `yes` | yes.wav | Affirmative response |
+| `no` | no.wav | Negative response |
+| `thanks` | thanks.wav | Gratitude |
+| `omnibot` | omnibot.wav | "Hello, I am Omnibot" intro |
+
+### Speech Scripts (Raspberry Pi)
+- `speak_pi.sh` - Text-to-speech with speaker on/off tones (espeak-ng + sox + pw-play)
+- `speak_phrase.sh` - Play pre-recorded WAV with speaker on/off tones
+
+## Bluetooth Audio Setup (PipeWire)
+
+The robot receives audio via Bluetooth. PipeWire routes audio to the paired speaker.
+
+### Pairing Bluetooth Speaker
+```bash
+bluetoothctl
+> scan on
+> pair XX:XX:XX:XX:XX:XX
+> trust XX:XX:XX:XX:XX:XX
+> connect XX:XX:XX:XX:XX:XX
+> exit
+```
+
+### Verify Audio Routing
+```bash
+# Check PipeWire sinks
+pactl list sinks short
+
+# Check Bluetooth device
+pactl list sinks | grep -A5 bluez
+
+# Test audio output
+sox -n -t wav - synth 1 sine 1000 | pw-play -
+```
+
+### Audio Path for Speech
+```
+Text → espeak-ng --stdout → pw-play → PipeWire → Bluetooth → Robot Speaker
+```
+
+### Audio Path for Tones
+```
+sox (generate sine) → pw-play → PipeWire → Bluetooth → Robot Speaker
 ```
 
 ## Useful Debug Commands
@@ -290,6 +342,36 @@ python robot_executor.py
 ## Port Reference
 - `8080` - Dashboard (dashboard.py) / Test detection (test_detection.py)
 - `11434` - Ollama API
+
+## Dashboard Features
+
+### Main Dashboard (`/`)
+- Live MJPEG stream with detection overlays
+- Manual robot controls (forward, back, left, right, stop)
+- Pattern buttons (dance, circle, square, etc.)
+- Speech buttons (Hello, Yes, No, Thanks) - uses pre-recorded phrases
+- Speaker Off button (🔇) - kills speech and resets robot
+- Detection history panel
+- LLM debug panel (shows prompts and responses)
+- Bluetooth status indicator
+
+### Kids Dashboard (`/kids`)
+- Simplified, colorful interface for children
+- Large mission buttons (Find Shoes, Find Person, Explore, etc.)
+- Big directional controls with emoji arrows
+- "Say Hello" button - plays pre-recorded omnibot greeting
+- "Quiet" button (🔇) - speaker off for kids
+
+### Dashboard API Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Main dashboard |
+| `/kids` | GET | Kid-friendly dashboard |
+| `/stream` | GET | MJPEG video stream |
+| `/api/command` | POST | Send robot command |
+| `/api/start` | POST | Start AI system |
+| `/api/stop` | POST | Stop AI system |
+| `/api/bluetooth` | GET | Bluetooth connection status |
 
 ## Module API Reference
 
@@ -383,14 +465,42 @@ from audio_commander import AudioCommander
 
 commander = AudioCommander(volume=0.5)
 
-# Movement tones
+# Movement tones (generated sine waves via sox + pw-play)
 commander.forward(500)   # 1614 Hz for 500ms
 commander.backward(500)  # 2013 Hz
 commander.left(500)      # 2208 Hz
 commander.right(500)     # 1811 Hz
+commander.speaker_on()   # 1422 Hz - enable robot speaker relay
+commander.speaker_off()  # 4650 Hz - disable robot speaker relay
 
-# Speech (sanitized)
-commander.speak("Hello!")
+# Text-to-speech (sanitized, calls speak_pi.sh)
+commander.speak("Hello!")  # Slower, supports any text
+
+# Pre-recorded phrases (faster, calls speak_phrase.sh)
+commander.speak_phrase("hello")   # hello.wav
+commander.speak_phrase("yes")     # yes.wav
+commander.speak_phrase("no")      # no.wav
+commander.speak_phrase("thanks")  # thanks.wav
+commander.speak_phrase("omnibot") # omnibot.wav
+
+# Stop speech and reset robot state
+commander.stop()           # Stops tones
+commander.stop_speaking()  # Kills speech processes + sends speaker_off
+```
+
+### AudioCommander Thread Safety
+Speech processes are managed with thread-safe locks:
+```python
+# Thread-safe process tracking
+self._proc_lock = threading.Lock()  # Protects process references
+self._espeak_proc = None            # Current speech process
+self._stopping = False              # Flag to abort speech
+
+# stop_speaking() safely:
+# 1. Sets _stopping flag
+# 2. Acquires lock, copies refs, clears refs
+# 3. Kills processes outside lock (avoids deadlock)
+# 4. Sends speaker_off tone via sox | pw-play
 ```
 
 ## Development Workflow

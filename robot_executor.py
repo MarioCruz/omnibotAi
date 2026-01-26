@@ -148,6 +148,17 @@ class RobotCommandExecutor:
                     return CommandResult(True, f"Speaking: {text}")
                 return CommandResult(False, "Invalid speakText format")
 
+            # Pre-recorded phrase commands (faster)
+            elif command.startswith('phrase('):
+                # Extract phrase name from phrase("...")
+                start = command.find('"') + 1
+                end = command.rfind('"')
+                if start > 0 and end > start:
+                    phrase = command[start:end]
+                    self.audio.speak_phrase(phrase)
+                    return CommandResult(True, f"Phrase: {phrase}")
+                return CommandResult(False, "Invalid phrase format")
+
             # Step commands with direction
             elif command.startswith('step('):
                 direction = command[5:-1].strip('"\'')

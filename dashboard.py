@@ -6,6 +6,7 @@ Live camera stream with detection overlays, LLM commands, and robot controls
 
 import io
 import json
+import subprocess
 import threading
 import time
 import os
@@ -70,7 +71,7 @@ mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
 
 
-def init_system(detector_backend='imx500', llm_model='mistral', volume=0.5):
+def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', volume=0.5):
     """Initialize all system components"""
     global camera, detector, llm, robot
 
@@ -227,8 +228,8 @@ def mjpeg_encoder_loop():
 
         if frame is not None:
             try:
-                # Encode as JPEG once
-                _, jpeg = cv2.imencode('.jpg', cv2.cvtColor(frame, cv2.COLOR_RGB2BGR), [cv2.IMWRITE_JPEG_QUALITY, 85])
+                # Encode as JPEG once (picamera2 RGB888 is already BGR in memory)
+                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
                 frame_bytes = (b'--frame\r\n'
                                b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
                 with mjpeg_lock:
@@ -516,11 +517,12 @@ DASHBOARD_HTML = """
                     <input type="text" id="speechInput" placeholder="Type message for robot to speak..." value="Hello, I am Tomy Omnibot">
                     <button onclick="speakText()">Speak</button>
                 </div>
-                <div class="controls" style="grid-template-columns: repeat(4, 1fr); margin-top: 10px;">
-                    <button class="btn-cmd" style="background:#ff922b;" onclick="sendCommand('speakText(\"Hello\")')">Hello</button>
-                    <button class="btn-cmd" style="background:#ff922b;" onclick="sendCommand('speakText(\"Yes\")')">Yes</button>
-                    <button class="btn-cmd" style="background:#ff922b;" onclick="sendCommand('speakText(\"No\")')">No</button>
-                    <button class="btn-cmd" style="background:#ff922b;" onclick="sendCommand('speakText(\"Thank you\")')">Thanks</button>
+                <div class="controls" style="grid-template-columns: repeat(5, 1fr); margin-top: 10px;">
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('hello')">Hello</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('yes')">Yes</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('no')">No</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('thanks')">Thanks</button>
+                    <button class="btn-cmd" style="background:#ff4444;" onclick="sendCommand('speaker_off')">🔇 Speaker Off</button>
                 </div>
             </div>
         </div>
@@ -544,6 +546,10 @@ DASHBOARD_HTML = """
                     <div class="stat-item">
                         <div class="value" id="statCommands">0</div>
                         <div class="label">Commands</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="value" id="statBt" style="color: #666;">--</div>
+                        <div class="label">Bluetooth</div>
                     </div>
                 </div>
             </div>
@@ -736,9 +742,35 @@ DASHBOARD_HTML = """
         function speakText() {
             const text = document.getElementById('speechInput').value;
             if (text) {
-                sendCommand(`speakText("${text}")`);
+                speakPhrase(text);
             }
         }
+
+        function speakPhrase(text) {
+            sendCommand('speakText("' + text + '")');
+        }
+
+        function playPhrase(name) {
+            sendCommand('phrase("' + name + '")');
+        }
+
+        function checkBt() {
+            fetch('/api/bluetooth')
+                .then(r => r.json())
+                .then(data => {
+                    const el = document.getElementById('statBt');
+                    if (data.connected) {
+                        el.textContent = data.devices[0] || 'ON';
+                        el.style.color = '#4488ff';
+                    } else {
+                        el.textContent = 'OFF';
+                        el.style.color = '#ff4444';
+                    }
+                })
+                .catch(() => {});
+        }
+        checkBt();
+        setInterval(checkBt, 5000);
     </script>
 </body>
 </html>
@@ -948,6 +980,11 @@ KIDS_DASHBOARD_HTML = """
             box-shadow: 0 0 10px var(--neon-yellow);
             animation: blink 1s infinite;
         }
+        .led.bluetooth { background: #000033; }
+        .led.bluetooth.on {
+            background: #4488ff;
+            box-shadow: 0 0 10px #4488ff, 0 0 20px #4488ff;
+        }
         @keyframes blink {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -1101,6 +1138,24 @@ KIDS_DASHBOARD_HTML = """
             height: 3px;
             background: var(--neon-green);
             box-shadow: 0 0 10px var(--neon-green);
+            border-radius: 2px;
+        }
+        .arcade-btn.red {
+            background: linear-gradient(180deg, #ff6666 0%, #cc0000 50%, #990000 100%);
+            border-top-color: #ff9999;
+            border-left-color: #ff6666;
+            color: #330000;
+            text-shadow: 1px 1px 0 rgba(255,255,255,0.3);
+        }
+        .arcade-btn.red::after {
+            content: '';
+            position: absolute;
+            bottom: -8px;
+            left: 10%;
+            right: 10%;
+            height: 3px;
+            background: #ff4444;
+            box-shadow: 0 0 10px #ff4444;
             border-radius: 2px;
         }
 
@@ -1281,6 +1336,10 @@ KIDS_DASHBOARD_HTML = """
                 <div class="led status" id="statusLed"></div>
                 <span class="status-text off" id="modeText">IDLE</span>
             </div>
+            <div class="led-cluster">
+                <div class="led bluetooth" id="btLed"></div>
+                <span class="status-text off" id="btText">BT OFF</span>
+            </div>
         </div>
 
         <div class="power-section">
@@ -1314,6 +1373,10 @@ KIDS_DASHBOARD_HTML = """
             <button class="arcade-btn cyan" onclick="sayHello()">
                 <span class="icon">📢</span>
                 <span>Speak</span>
+            </button>
+            <button class="arcade-btn red" onclick="speakerOff()">
+                <span class="icon">🔇</span>
+                <span>Quiet</span>
             </button>
         </div>
 
@@ -1414,9 +1477,43 @@ KIDS_DASHBOARD_HTML = """
             fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: 'speakText("Hello! I am Omnibot!")' })
+                body: JSON.stringify({ command: 'phrase("omnibot")' })
             });
         }
+
+        function speakerOff() {
+            const missionEl = document.getElementById('missionText');
+            missionEl.textContent = 'SPEAKER OFF';
+            missionEl.className = 'mission-text';
+            fetch('/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command: 'speaker_off' })
+            });
+        }
+
+        function checkBluetooth() {
+            fetch('/api/bluetooth')
+                .then(r => r.json())
+                .then(data => {
+                    const led = document.getElementById('btLed');
+                    const text = document.getElementById('btText');
+                    if (data.connected) {
+                        led.className = 'led bluetooth on';
+                        text.textContent = data.devices[0] || 'BT ON';
+                        text.className = 'status-text';
+                    } else {
+                        led.className = 'led bluetooth';
+                        text.textContent = 'BT OFF';
+                        text.className = 'status-text off';
+                    }
+                })
+                .catch(() => {});
+        }
+
+        // Poll Bluetooth status every 5 seconds
+        checkBluetooth();
+        setInterval(checkBluetooth, 5000);
     </script>
 </body>
 </html>
@@ -1476,6 +1573,12 @@ def api_command():
     if not cmd:
         return jsonify({'status': 'error', 'message': 'No command provided'})
     if robot and robot.connected:
+        # Special handling for speaker_off - kills speech and sends speaker off tone
+        if cmd == 'speaker_off':
+            if robot.audio:
+                robot.audio.stop_speaking()
+                return jsonify({'status': 'ok', 'result': True, 'message': 'Speaker off sent'})
+            return jsonify({'status': 'error', 'message': 'Audio not available'})
         result = robot.execute(cmd)
         return jsonify({'status': 'ok', 'result': result.success})
     return jsonify({'status': 'error', 'message': 'Robot not connected'})
@@ -1484,6 +1587,27 @@ def api_command():
 @app.route('/api/status', methods=['GET'])
 def api_status():
     return jsonify(system_state)
+
+
+@app.route('/api/bluetooth', methods=['GET'])
+def api_bluetooth():
+    """Check Bluetooth connection status."""
+    try:
+        result = subprocess.run(
+            ['bluetoothctl', 'devices', 'Connected'],
+            capture_output=True, text=True, timeout=3
+        )
+        devices = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
+        connected = len(devices) > 0
+        # Parse device names (format: "Device XX:XX:XX:XX:XX:XX Name")
+        names = []
+        for dev in devices:
+            parts = dev.split(' ', 2)
+            if len(parts) >= 3:
+                names.append(parts[2])
+        return jsonify({'connected': connected, 'devices': names})
+    except Exception:
+        return jsonify({'connected': False, 'devices': []})
 
 
 @app.route('/health')
@@ -1514,7 +1638,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='AI Robot Dashboard')
     parser.add_argument('--detector', default='imx500', choices=['imx500', 'yolov5', 'mediapipe'])
-    parser.add_argument('--llm-model', default='mistral', help='Ollama model')
+    parser.add_argument('--llm-model', default='llama-3.1-8b-instant', help='LLM model (Groq default: llama-3.1-8b-instant, Ollama: mistral)')
     parser.add_argument('--port', type=int, default=8080, help='Dashboard port')
     parser.add_argument('--no-ssl', action='store_true', help='Disable HTTPS')
     parser.add_argument('--volume', type=float, default=0.5, help='Audio volume (0.0-1.0)')
