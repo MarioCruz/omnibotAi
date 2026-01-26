@@ -113,22 +113,22 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 ```
 omniai/
 ├── dashboard.py              # Web dashboard with live stream + robot control
-├── test_detection.py         # Standalone detection test (YOLOv8)
 ├── camera_capture.py         # Thread-safe camera capture with IMX500 support
 ├── object_detector.py        # Multi-backend detection (IMX500 YOLOv8 default)
 ├── llm_command_generator.py  # Cloud (Groq) + local (Ollama) LLM integration
 ├── robot_executor.py         # Robot command executor (audio tones + speech)
 ├── audio_commander.py        # Audio frequency generator + speech (thread-safe)
+├── eye_display.py            # ST7735S TFT animated eye display
 ├── speak_pi.sh               # Text-to-speech script (Pi - espeak + pw-play)
 ├── speak_phrase.sh           # Pre-recorded phrase player (Pi)
-├── audio_phrases/            # Pre-recorded WAV files for fast speech
-│   ├── hello.wav
-│   ├── yes.wav
-│   ├── no.wav
-│   ├── thanks.wav
-│   └── omnibot.wav
 ├── speak.sh                  # Text-to-speech script (macOS - for testing)
-├── start.sh                  # Quick start script
+├── audio_phrases/            # Pre-recorded WAV files for fast speech
+│   ├── hello.wav, yes.wav, no.wav, thanks.wav, omnibot.wav
+├── util/                     # Test scripts and utilities
+│   ├── test_eye_display.py   # Eye display test
+│   ├── test_detection.py     # Camera/detection test
+│   ├── generate_certs.sh     # SSL certificate generator
+│   └── start.sh              # Quick start script
 ├── .env                      # API keys (GROQ_API_KEY)
 ├── CLAUDE.md                 # Technical reference for Claude Code
 └── README.md                 # This file
@@ -189,6 +189,78 @@ bluetoothctl
 > pair XX:XX:XX:XX:XX:XX
 > trust XX:XX:XX:XX:XX:XX
 > connect XX:XX:XX:XX:XX:XX
+```
+
+## Eye Display (ST7735S TFT)
+
+Animated robot eye on a 1.8" ST7735S TFT display (128x160 RGB) for personality.
+
+### Wiring
+
+| ST7735S Pin | Raspberry Pi |
+|-------------|--------------|
+| VCC | 3.3V |
+| GND | GND |
+| SCL | GPIO11 (SCLK) |
+| SDA | GPIO10 (MOSI) |
+| RES | GPIO25 |
+| DC | GPIO24 |
+| CS | GPIO8 (CE0) |
+| BLK | 3.3V |
+
+### Setup
+```bash
+# Enable SPI
+sudo raspi-config  # Interface Options -> SPI -> Enable
+
+# Install libraries
+pip install st7735 gpiodevice
+
+# Test display
+python util/test_eye_display.py
+```
+
+### Display Configuration
+- **Mode**: Portrait (128x160)
+- **Rotation**: 0
+- **Offsets**: left=2, top=1
+
+### Expressions
+| Expression | Description |
+|------------|-------------|
+| `normal` | Default relaxed eye |
+| `happy` | Dilated pupil, curved smile |
+| `surprised` | Wide eye, small pupil |
+| `sleepy` | Half-closed eyelids |
+| `angry` | Angled eyebrow |
+| `look_left/right/up/down` | Pupil tracking |
+
+### Testing Expressions
+
+The eye reacts automatically to robot activity:
+
+| Trigger | Expression | How to Test |
+|---------|------------|-------------|
+| Person detected | Happy | Stand in front of the camera |
+| Cat/dog detected | Surprised | Show it a cat or dog (or a picture) |
+| Left command | Look left | Press left button on dashboard |
+| Right command | Look right | Press right button on dashboard |
+| Forward command | Look up | Press forward button |
+| Backward command | Look down | Press backward button |
+| Speech command | Blink + Happy | Press "Hello" or other speech buttons |
+| 30s inactivity | Sleepy | Wait with nothing happening |
+| Random | Blink | Automatic every 3-7 seconds |
+
+### Integration
+```python
+from eye_display import EyeDisplay, eye_happy, eye_surprised
+
+eye = EyeDisplay()
+eye.start()
+
+eye.set_expression(EyeDisplay.EXPR_HAPPY)
+eye.look_at(0.5, 0)  # Look right
+eye.blink()
 ```
 
 ## Dashboard Features

@@ -35,6 +35,7 @@ from camera_capture import CameraCapture
 from object_detector import ObjectDetector
 from llm_command_generator import LLMCommandGenerator
 from robot_executor import RobotCommandExecutor
+from eye_display import EyeDisplay
 
 app = Flask(__name__)
 CORS(app)
@@ -62,9 +63,14 @@ camera = None
 detector = None
 llm = None
 robot = None
+eye_display = None
 frame_lock = threading.Lock()
 current_frame = None
 annotated_frame = None
+
+# Eye display activity tracking
+last_activity_time = time.time()
+IDLE_TIMEOUT = 30  # Seconds before going sleepy
 
 # Cached MJPEG bytes (encode once, share with all clients)
 mjpeg_lock = threading.Lock()
@@ -109,6 +115,17 @@ def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', vol
     robot = RobotCommandExecutor(volume=volume)
     robot.connect()
 
+    # Eye display - animated robot eye on ST7735S TFT
+    global eye_display
+    print("[Dashboard] Initializing eye display...")
+    try:
+        eye_display = EyeDisplay()
+        eye_display.start()
+        print("[Dashboard] Eye display started")
+    except Exception as e:
+        print(f"[Dashboard] Eye display not available: {e}")
+        eye_display = None
+
     print("[Dashboard] System ready!")
 
 
@@ -142,6 +159,22 @@ def process_loop():
                 system_state['stats']['total_detections'] += len(detections)
                 # Limit stored detections to prevent unbounded memory growth
                 system_state['detections'] = detections[:100]
+
+            # Eye display reactions to detections
+            if eye_display and detections:
+                global last_activity_time
+                last_activity_time = time.time()
+                # Check what we detected
+                labels = [d['label'].lower() for d in detections]
+                if 'person' in labels:
+                    # Happy when seeing a person
+                    eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
+                elif 'cat' in labels or 'dog' in labels:
+                    # Surprised for animals
+                    eye_display.set_expression(EyeDisplay.EXPR_SURPRISED)
+                else:
+                    # Normal for other objects
+                    eye_display.set_expression(EyeDisplay.EXPR_NORMAL)
 
             # Draw detections on frame
             annotated = draw_detections(frame, detections)
@@ -180,6 +213,12 @@ def process_loop():
                 'stats': system_state['stats'],
                 'llm_debug': llm_debug
             })
+
+            # Eye display idle behavior - go sleepy after inactivity
+            if eye_display and not detections:
+                idle_time = time.time() - last_activity_time
+                if idle_time > IDLE_TIMEOUT:
+                    eye_display.set_expression(EyeDisplay.EXPR_SLEEPY)
 
             time.sleep(0.5)  # Process every 0.5 seconds
 
@@ -483,7 +522,7 @@ DASHBOARD_HTML = """
             <div class="panel">
                 <h2>Camera Feed</h2>
                 <div class="stream-container">
-                    <img src="/stream" alt="Camera Stream" id="stream">
+                    <img src="/stream" alt="Camera Stream" id="stream" onerror="setTimeout(() => this.src='/stream?' + Date.now(), 1000)">
                 </div>
                 <div class="controls">
                     <button class="btn-start" onclick="startSystem()">Start</button>
@@ -1323,7 +1362,7 @@ KIDS_DASHBOARD_HTML = """
 
         <div class="video-frame">
             <div class="video-box">
-                <img src="/stream" alt="Robot Camera">
+                <img src="/stream" alt="Robot Camera" id="cameraStream" onerror="setTimeout(() => this.src='/stream?' + Date.now(), 1000)">
             </div>
         </div>
 
@@ -1568,10 +1607,32 @@ def api_task():
 
 @app.route('/api/command', methods=['POST'])
 def api_command():
+    global last_activity_time
     data = request.json or {}
     cmd = data.get('command', '')
     if not cmd:
         return jsonify({'status': 'error', 'message': 'No command provided'})
+
+    # Eye display reactions to commands
+    if eye_display:
+        last_activity_time = time.time()
+        cmd_lower = cmd.lower()
+        if cmd_lower == 'left':
+            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_LEFT)
+        elif cmd_lower == 'right':
+            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_RIGHT)
+        elif cmd_lower == 'forward':
+            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_UP)
+        elif cmd_lower == 'backward':
+            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_DOWN)
+        elif 'speak' in cmd_lower or 'phrase' in cmd_lower:
+            eye_display.blink()
+            eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
+        elif cmd_lower == 'dance':
+            eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
+        elif cmd_lower == 'stop' or cmd_lower == 'speaker_off':
+            eye_display.set_expression(EyeDisplay.EXPR_NORMAL)
+
     if robot and robot.connected:
         # Special handling for speaker_off - kills speech and sends speaker off tone
         if cmd == 'speaker_off':
@@ -1617,11 +1678,13 @@ def health():
 
 def shutdown_system():
     """Gracefully shutdown all components"""
-    global system_state, camera, robot, process_thread
+    global system_state, camera, robot, eye_display, process_thread
     print("\n[Dashboard] Shutting down...")
     system_state['shutdown'] = True
     system_state['running'] = False
 
+    if eye_display:
+        eye_display.stop()
     if robot:
         robot.disconnect()
     if camera:

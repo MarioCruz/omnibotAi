@@ -35,14 +35,14 @@ sudo reboot
 cd ~/omniai
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
-pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice
+pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice st7735 gpiodevice
 ```
 
 ### Enable Camera & SPI
 ```bash
 sudo raspi-config
 # Interface Options -> Camera -> Enable
-# Interface Options -> SPI -> Enable (for IMX500 neural accelerator)
+# Interface Options -> SPI -> Enable (for IMX500 and ST7735S display)
 sudo reboot
 ```
 
@@ -501,6 +501,79 @@ self._stopping = False              # Flag to abort speech
 # 2. Acquires lock, copies refs, clears refs
 # 3. Kills processes outside lock (avoids deadlock)
 # 4. Sends speaker_off tone via sox | pw-play
+```
+
+### EyeDisplay (ST7735S TFT)
+Animated robot eye on 1.8" ST7735S TFT (128x160 RGB) connected via SPI.
+
+```python
+from eye_display import EyeDisplay
+
+eye = EyeDisplay(dc_pin=24, rst_pin=25, cs_pin=0)
+eye.start()
+
+# Set expressions
+eye.set_expression(EyeDisplay.EXPR_HAPPY)
+eye.set_expression(EyeDisplay.EXPR_SURPRISED)
+eye.set_expression(EyeDisplay.EXPR_SLEEPY)
+eye.set_expression(EyeDisplay.EXPR_ANGRY)
+eye.set_expression(EyeDisplay.EXPR_LOOKING_LEFT)
+eye.set_expression(EyeDisplay.EXPR_LOOKING_RIGHT)
+
+# Pupil tracking (-1.0 to 1.0 range)
+eye.look_at(0.5, 0)   # Look right
+eye.look_at(-0.5, 0)  # Look left
+eye.look_at(0, -0.5)  # Look up
+
+# Manual blink
+eye.blink()
+
+# Stop animation
+eye.stop()
+```
+
+### ST7735S Wiring
+| ST7735S Pin | Raspberry Pi GPIO |
+|-------------|-------------------|
+| VCC | 3.3V |
+| GND | GND |
+| SCL (SCLK) | GPIO11 (SPI0 SCLK) |
+| SDA (MOSI) | GPIO10 (SPI0 MOSI) |
+| RES (RST) | GPIO25 |
+| DC | GPIO24 |
+| CS | GPIO8 (SPI0 CE0) |
+| BLK | 3.3V (backlight always on) |
+
+### Eye Expressions
+| Constant | Description |
+|----------|-------------|
+| `EXPR_NORMAL` | Default relaxed eye |
+| `EXPR_HAPPY` | Dilated pupil, curved line below |
+| `EXPR_SURPRISED` | Wide eye, small pupil |
+| `EXPR_SLEEPY` | Half-closed eyelids |
+| `EXPR_ANGRY` | Angled eyebrow overlay |
+| `EXPR_LOOKING_LEFT` | Pupil offset left |
+| `EXPR_LOOKING_RIGHT` | Pupil offset right |
+| `EXPR_LOOKING_UP` | Pupil offset up |
+| `EXPR_LOOKING_DOWN` | Pupil offset down |
+| `EXPR_BLINK` | Fully closed |
+
+### Display Configuration
+```python
+# ST7735S 1.8" TFT working settings:
+width=128, height=160   # Portrait mode
+rotation=0
+offset_left=2, offset_top=1
+invert=False
+```
+
+### Testing Eye Display
+```bash
+# Install libraries
+pip install st7735 gpiodevice
+
+# Run test (cycles through all expressions)
+python util/test_eye_display.py
 ```
 
 ## Development Workflow
