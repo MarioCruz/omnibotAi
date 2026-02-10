@@ -388,12 +388,57 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' \
     /path/to/omnibotAi/ admin@omniai.local:/home/admin/omniai/
 ```
 
+## Future: Custom Model Training
+
+Currently using pre-trained YOLOv8 with 80 COCO classes. The IMX500 ecosystem supports training custom models to recognize specific objects (e.g., "Mario's shoes" instead of generic "shoes").
+
+See: [Streamline dataset creation for the Raspberry Pi AI Camera](https://www.raspberrypi.com/news/streamline-dataset-creation-for-the-raspberry-pi-ai-camera/)
+
+### Available Tools
+
+| Tool | Description | Link |
+|------|-------------|------|
+| **Brain Builder for AITRIOS** | No-code custom model training, needs only ~50 images | [Sony AITRIOS](https://info.aitrios.sony-semicon.com/developers-blog/build-custom-ai-models-for-raspberry-pi-ai-camera-zero-coding-required) |
+| **Roboflow** | Dataset annotation/labeling, exports to YOLOv8 format | [roboflow.com](https://roboflow.com) |
+| **imx500_zoo** | Command-line training with NanoDet | [Hackster Tutorial](https://www.hackster.io/541341/how-to-create-a-custom-object-detection-ai-model-pt-1-f7203e) |
+| **Edge-MDT** | Model conversion and quantization toolkit | [Sony Developer Docs](https://www.aitrios.sony-semicon.com/edge-ai-devices/raspberry-pi-ai-camera) |
+
+### Custom Training Pipeline
+
+```
+1. Capture images → 2. Annotate (Roboflow) → 3. Train (Brain Builder/imx500_zoo)
+                                                         ↓
+4. Deploy RPK ← 5. Package (imx500-package) ← 6. Quantize (Edge-MDT)
+```
+
+### Model Types Beyond Detection
+
+| Type | Use Case |
+|------|----------|
+| **Classifier** | "Is this a cat or dog?" - single class output |
+| **Detector** | "Where are all the people?" - bounding boxes |
+| **Anomaly Recognizer** | "Is something wrong?" - defect detection |
+| **Segmentation** | Pixel-level object boundaries |
+
+### Model Caching
+
+The IMX500 has **16MB flash** for caching multiple models. With 2-3MB models, you can store 4-5 models and switch between them without re-uploading.
+
+### Potential Use Cases
+
+- Train on specific household items for better "find my X" missions
+- Recognize family members by face
+- Detect specific pets
+- Custom gesture recognition
+
 ## Resources
 
 - [IMX500 Documentation](https://www.raspberrypi.com/documentation/accessories/ai-camera.html)
 - [IMX500 Model Zoo](https://github.com/raspberrypi/imx500-models)
 - [Picamera2 Examples](https://github.com/raspberrypi/picamera2/tree/main/examples/imx500)
 - [Ollama](https://ollama.ai/)
+- [Brain Builder for AITRIOS](https://info.aitrios.sony-semicon.com/developers-blog/build-custom-ai-models-for-raspberry-pi-ai-camera-zero-coding-required)
+- [Custom Model Tutorial](https://www.hackster.io/541341/how-to-create-a-custom-object-detection-ai-model-pt-1-f7203e)
 
 ## License
 
