@@ -580,7 +580,18 @@ python util/test_eye_display.py
 
 **Primary development happens on local GitHub repo** to avoid Pi SD card corruption issues.
 
-### Push to Pi (deploy changes)
+### Deploy via Git (recommended)
+```bash
+# Push from local
+git push origin main
+
+# Pull on Pi
+ssh admin@omniai.local "cd /home/admin/omniai && git pull"
+```
+
+The Pi has `gh` CLI authenticated and tracks `origin/main` via HTTPS.
+
+### Deploy via rsync (alternative)
 ```bash
 rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.pem' --exclude='.DS_Store' --exclude='._*' --exclude='models/' --exclude='.git/' --exclude='*.log' /Users/mariocruz/Documents/GitHub/omnibotAi/ admin@omniai.local:/home/admin/omniai/
 ```
@@ -588,6 +599,15 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclud
 ### Sync from Pi (backup)
 ```bash
 /Users/mariocruz/Documents/GitHub/omnibotAi/sync_from_pi.sh
+```
+
+### Starting the Dashboard
+```bash
+# On the Pi (works from any directory)
+~/omniai/util/start.sh
+
+# With options
+~/omniai/util/start.sh --volume 0.7 --port 8080
 ```
 
 ## Security Notes

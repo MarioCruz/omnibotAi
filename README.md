@@ -382,10 +382,28 @@ vcgencmd get_camera
 
 Primary development happens on local machine, deploy to Pi:
 
+### Deploy via Git (recommended)
 ```bash
-# Deploy to Pi
+# From local machine: commit and push
+git add . && git commit -m "your changes" && git push
+
+# On the Pi: pull latest
+ssh admin@omniai.local "cd /home/admin/omniai && git pull"
+```
+
+### Deploy via rsync (alternative)
+```bash
 rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' \
     /path/to/omnibotAi/ admin@omniai.local:/home/admin/omniai/
+```
+
+### Starting the Dashboard
+```bash
+# On the Pi (works from any directory)
+~/omniai/util/start.sh
+
+# With options
+~/omniai/util/start.sh --volume 0.7 --port 8080
 ```
 
 ## Future: Custom Model Training
