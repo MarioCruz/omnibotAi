@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Eye Display Module for ST7735S 1.8" TFT (128x160)
-Animated robot eye for personality and feedback
+Eye Display Module - supports ST7735S 1.8" TFT (128x160) and SSD1351 OLED (128x128)
+Animated robot eye for personality and feedback.
+
+Display type is set via config.json "eye_display": "st7735" or "ssd1351"
 """
 
 import time
@@ -9,24 +11,40 @@ import threading
 import random
 from PIL import Image, ImageDraw
 
-# Try to import st7735 library (only works on Pi)
+# Try to import display libraries (only work on Pi)
+HAS_ST7735 = False
+HAS_SSD1351 = False
+
 try:
     import st7735 as ST7735
-    HAS_DISPLAY = True
+    HAS_ST7735 = True
 except ImportError:
-    HAS_DISPLAY = False
-    print("[EyeDisplay] st7735 library not found - running in simulation mode")
+    pass
+
+try:
+    from luma.oled.device import ssd1351
+    from luma.core.interface.serial import spi as luma_spi
+    HAS_SSD1351 = True
+except ImportError:
+    pass
+
+if not HAS_ST7735 and not HAS_SSD1351:
+    print("[EyeDisplay] No display library found - running in simulation mode")
+
+HAS_DISPLAY = HAS_ST7735 or HAS_SSD1351
 
 
 class EyeDisplay:
-    """Animated eye display on ST7735S TFT"""
+    """Animated eye display - supports ST7735S TFT (128x160) and SSD1351 OLED (128x128)"""
 
-    # Display dimensions (1.8" ST7735S in portrait mode)
-    WIDTH = 128
-    HEIGHT = 160
+    # Display dimensions per type
+    DISPLAY_SIZES = {
+        'st7735':  (128, 160),
+        'ssd1351': (128, 128),
+    }
 
     # Eye parameters
-    EYE_COLOR = (0, 200, 255)      # Cyan iris
+    EYE_COLOR = (0, 200, 255)       # Cyan iris
     PUPIL_COLOR = (0, 0, 0)        # Black pupil
     SCLERA_COLOR = (255, 255, 255) # White sclera
     BG_COLOR = (20, 20, 40)        # Dark blue background
@@ -48,26 +66,21 @@ class EyeDisplay:
     EXPR_LOOKING_DOWN = 'look_down'
     EXPR_BLINK = 'blink'
 
-    def __init__(self, dc_pin=24, rst_pin=25, cs_pin=0, spi_port=0, backlight_pin=None):
+    def __init__(self, display_type='st7735', dc_pin=24, rst_pin=25, cs_pin=0, spi_port=0, brightness=15):
         """
         Initialize the eye display.
 
-        Default GPIO pins:
-          DC  = GPIO24
-          RST = GPIO25
-          CS  = CE0 (GPIO8)
-          SPI = SPI0
-
-        Wiring:
-          VCC  -> 3.3V
-          GND  -> GND
-          SCL  -> GPIO11 (SCLK)
-          SDA  -> GPIO10 (MOSI)
-          RES  -> GPIO25
-          DC   -> GPIO24
-          CS   -> GPIO8
-          BLK  -> 3.3V (or GPIO for control)
+        Args:
+            display_type: 'st7735' for ST7735S TFT or 'ssd1351' for SSD1351 OLED
+            brightness: SSD1351 master contrast 0-15 (default 15 = max)
+            dc_pin: GPIO pin for DC (data/command)
+            rst_pin: GPIO pin for RST (reset)
+            cs_pin: SPI chip select (0=CE0, 1=CE1)
+            spi_port: SPI bus (0 or 1)
         """
+        self.display_type = display_type
+        self.WIDTH, self.HEIGHT = self.DISPLAY_SIZES.get(display_type, (128, 160))
+
         self.expression = self.EXPR_NORMAL
         self.pupil_offset_x = 0
         self.pupil_offset_y = 0
@@ -75,7 +88,21 @@ class EyeDisplay:
         self.running = False
         self.lock = threading.Lock()
 
-        if HAS_DISPLAY:
+        self.display = None
+        self._luma_device = None  # Only used for SSD1351
+
+        if display_type == 'ssd1351' and HAS_SSD1351:
+            try:
+                serial = luma_spi(port=spi_port, device=cs_pin, gpio_DC=dc_pin, gpio_RST=rst_pin)
+                self._luma_device = ssd1351(serial, width=self.WIDTH, height=self.HEIGHT)
+                self._spi_serial = serial
+                # Set brightness using proper SSD1351 command/data sequence
+                self._set_oled_brightness(brightness)
+                self.display = self._luma_device
+                print(f"[EyeDisplay] SSD1351 OLED initialized ({self.WIDTH}x{self.HEIGHT}, brightness={brightness})")
+            except Exception as e:
+                print(f"[EyeDisplay] Failed to initialize SSD1351: {e}")
+        elif display_type == 'st7735' and HAS_ST7735:
             try:
                 self.display = ST7735.ST7735(
                     port=spi_port,
@@ -84,18 +111,18 @@ class EyeDisplay:
                     rst=rst_pin,
                     width=self.WIDTH,
                     height=self.HEIGHT,
-                    rotation=0,  # Portrait mode
+                    rotation=0,
                     invert=False,
                     offset_left=2,
                     offset_top=1
                 )
-                self.display._spi.max_speed_hz = 24000000  # 24MHz for smooth updates
+                self.display._spi.max_speed_hz = 24000000
                 print(f"[EyeDisplay] ST7735S initialized ({self.WIDTH}x{self.HEIGHT})")
             except Exception as e:
-                print(f"[EyeDisplay] Failed to initialize display: {e}")
+                print(f"[EyeDisplay] Failed to initialize ST7735S: {e}")
                 self.display = None
         else:
-            self.display = None
+            print(f"[EyeDisplay] No driver for '{display_type}' - running in simulation mode")
 
         # Create image buffer
         self.image = Image.new('RGB', (self.WIDTH, self.HEIGHT), self.BG_COLOR)
@@ -105,6 +132,22 @@ class EyeDisplay:
         self.animation_thread = None
         self.blink_time = 0
         self.next_blink = time.time() + random.uniform(2, 5)
+
+    def _set_oled_brightness(self, level):
+        """Set SSD1351 brightness via command + data (like Arduino's sendCommand).
+        level: 0-15 for master contrast (0x00-0x0F)
+        """
+        if not self._luma_device or not self._spi_serial:
+            return
+        level = max(0, min(15, level))
+        channel = int(level * 255 / 15)  # Scale 0-15 to 0-255 for per-channel
+        # SSD1351 command 0xC1: Set Contrast for A, B, C (needs command then 3 data bytes)
+        self._spi_serial.command(0xC1)
+        self._spi_serial.data([channel, channel, channel])
+        # SSD1351 command 0xC7: Master Contrast (needs command then 1 data byte)
+        self._spi_serial.command(0xC7)
+        self._spi_serial.data([level])
+        print(f"[EyeDisplay] SSD1351 brightness: master={level}/15, channel={channel}/255")
 
     def start(self):
         """Start the eye animation loop"""
@@ -189,7 +232,10 @@ class EyeDisplay:
 
                 # Update display
                 if self.display:
-                    self.display.display(self.image)
+                    if self._luma_device:
+                        self._luma_device.display(self.image.convert(self._luma_device.mode))
+                    else:
+                        self.display.display(self.image)
 
                 time.sleep(0.033)  # ~30 FPS
 
@@ -339,8 +385,31 @@ def eye_blink():
 
 # Test mode
 if __name__ == '__main__':
-    print("Testing Eye Display...")
-    print("Wiring for ST7735S 1.8\" (128x160):")
+    import argparse
+    import json
+    import os
+
+    parser = argparse.ArgumentParser(description='Test Eye Display')
+    parser.add_argument('--display', choices=['st7735', 'ssd1351'],
+                        help='Display type (default: from config.json)')
+    test_args = parser.parse_args()
+
+    # Load from config.json if no CLI arg
+    display_type = test_args.display
+    if not display_type:
+        config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                cfg = json.load(f)
+            display_type = cfg.get('eye_display', 'st7735')
+        else:
+            display_type = 'st7735'
+
+    print(f"Testing Eye Display ({display_type})...")
+    if display_type == 'ssd1351':
+        print("Wiring for SSD1351 1.5\" OLED (128x128):")
+    else:
+        print("Wiring for ST7735S 1.8\" TFT (128x160):")
     print("  VCC  -> 3.3V")
     print("  GND  -> GND")
     print("  SCL  -> GPIO11 (SCLK)")
@@ -351,7 +420,7 @@ if __name__ == '__main__':
     print("  BLK  -> 3.3V")
     print()
 
-    eye = EyeDisplay()
+    eye = EyeDisplay(display_type=display_type)
     eye.start()
 
     try:

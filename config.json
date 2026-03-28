@@ -1,0 +1,13 @@
+{
+  "eye_display": "ssd1351",
+  "eye_spi_port": 0,
+  "eye_dc_pin": 24,
+  "eye_rst_pin": 25,
+  "eye_cs_pin": 0,
+  "eye_brightness": 15,
+
+  "detector": "imx500",
+  "llm_model": "llama-3.1-8b-instant",
+  "volume": 0.5,
+  "port": 8080
+}

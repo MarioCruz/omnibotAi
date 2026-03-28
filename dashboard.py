@@ -37,6 +37,17 @@ from llm_command_generator import LLMCommandGenerator
 from robot_executor import RobotCommandExecutor
 from eye_display import EyeDisplay
 
+
+def load_config():
+    """Load robot configuration from config.json"""
+    config_path = os.path.join(os.path.dirname(__file__), 'config.json')
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            return json.load(f)
+    return {}
+
+robot_config = load_config()
+
 app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -77,7 +88,9 @@ mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
 
 
-def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', volume=0.5):
+def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', volume=0.5,
+                eye_display_type='st7735', eye_dc_pin=24, eye_rst_pin=25, eye_cs_pin=0, eye_spi_port=0,
+                eye_brightness=15):
     """Initialize all system components"""
     global camera, detector, llm, robot
 
@@ -115,16 +128,27 @@ def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', vol
     robot = RobotCommandExecutor(volume=volume)
     robot.connect()
 
-    # Eye display - animated robot eye on ST7735S TFT
+    # Eye display - configurable via config.json: st7735, ssd1351, or none
     global eye_display
-    print("[Dashboard] Initializing eye display...")
-    try:
-        eye_display = EyeDisplay()
-        eye_display.start()
-        print("[Dashboard] Eye display started")
-    except Exception as e:
-        print(f"[Dashboard] Eye display not available: {e}")
+    if eye_display_type == 'none':
+        print("[Dashboard] Eye display disabled")
         eye_display = None
+    else:
+        print(f"[Dashboard] Initializing eye display ({eye_display_type})...")
+        try:
+            eye_display = EyeDisplay(
+                display_type=eye_display_type,
+                dc_pin=eye_dc_pin,
+                rst_pin=eye_rst_pin,
+                cs_pin=eye_cs_pin,
+                spi_port=eye_spi_port,
+                brightness=eye_brightness,
+            )
+            eye_display.start()
+            print(f"[Dashboard] Eye display started ({eye_display_type})")
+        except Exception as e:
+            print(f"[Dashboard] Eye display not available: {e}")
+            eye_display = None
 
     print("[Dashboard] System ready!")
 
@@ -1704,14 +1728,24 @@ if __name__ == '__main__':
     parser.add_argument('--llm-model', default='llama-3.1-8b-instant', help='LLM model (Groq default: llama-3.1-8b-instant, Ollama: mistral)')
     parser.add_argument('--port', type=int, default=8080, help='Dashboard port')
     parser.add_argument('--no-ssl', action='store_true', help='Disable HTTPS')
-    parser.add_argument('--volume', type=float, default=0.5, help='Audio volume (0.0-1.0)')
+    parser.add_argument('--volume', type=float, default=robot_config.get('volume', 0.5),
+                        help='Audio volume (0.0-1.0)')
+    parser.add_argument('--eye-display', default=robot_config.get('eye_display', 'st7735'),
+                        choices=['st7735', 'ssd1351', 'none'],
+                        help='Eye display type (default: from config.json)')
     args = parser.parse_args()
 
-    # Initialize system
+    # Initialize system with config.json defaults merged with CLI overrides
     init_system(
         detector_backend=args.detector,
         llm_model=args.llm_model,
-        volume=args.volume
+        volume=args.volume,
+        eye_display_type=args.eye_display,
+        eye_dc_pin=robot_config.get('eye_dc_pin', 24),
+        eye_rst_pin=robot_config.get('eye_rst_pin', 25),
+        eye_cs_pin=robot_config.get('eye_cs_pin', 0),
+        eye_spi_port=robot_config.get('eye_spi_port', 0),
+        eye_brightness=robot_config.get('eye_brightness', 15),
     )
 
     # Start processing thread
