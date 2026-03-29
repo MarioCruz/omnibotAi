@@ -91,7 +91,7 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                     IMX500 AI Camera                          │
+│                     IMX500 AI Camera                         │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐   │
 │  │   Image     │───▶│  Neural Net │───▶│  Detection      │   │
 │  │   Sensor    │    │  Processor  │    │  Results        │   │
@@ -100,10 +100,10 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
                                                   │
                                                   ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                    Raspberry Pi 5                             │
+│                    Raspberry Pi 5                            │
 │  ┌─────────────┐    ┌─────────────┐    ┌─────────────────┐   │
 │  │  picamera2  │───▶│  Dashboard  │───▶│  Web Browser    │   │
-│  │  (metadata) │    │  (Flask)    │    │  (MJPEG+WebSocket)│  │
+│  │  (metadata) │    │  (Flask)    │    │(MJPEG+WebSocket)│   │
 │  └─────────────┘    └─────────────┘    └─────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 ```
