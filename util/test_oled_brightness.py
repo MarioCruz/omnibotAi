@@ -22,7 +22,7 @@ from PIL import Image, ImageDraw
 
 def draw_test_pattern(device):
     """Draw a simple eye-like pattern to judge brightness"""
-    img = Image.new(device.mode, (128, 128), (30, 25, 55))
+    img = Image.new(device.mode, (128, 128), (0, 0, 0))
     draw = ImageDraw.Draw(img)
     # White circle
     draw.ellipse([24, 24, 104, 104], fill=(255, 255, 255))
