@@ -4,7 +4,7 @@
   "eye_dc_pin": 24,
   "eye_rst_pin": 25,
   "eye_cs_pin": 0,
-  "eye_brightness": 15,
+  "eye_brightness": 10,
 
   "detector": "imx500",
   "llm_model": "llama-3.1-8b-instant",

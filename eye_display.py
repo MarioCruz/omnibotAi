@@ -47,7 +47,7 @@ class EyeDisplay:
     EYE_COLOR = (0, 200, 255)       # Cyan iris
     PUPIL_COLOR = (0, 0, 0)        # Black pupil
     SCLERA_COLOR = (255, 255, 255) # White sclera
-    BG_COLOR = (20, 20, 40)        # Dark blue background
+    BG_COLOR = (0, 0, 0)            # Pure black background (OLED pixels off)
 
     # Eye dimensions (centered on display)
     EYE_RADIUS = 45
