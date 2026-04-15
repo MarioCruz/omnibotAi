@@ -160,7 +160,9 @@ class ObjectDetector:
             input_w, input_h = self.imx500.get_input_size()
 
             # Check for nanodet postprocessing
-            if self.intrinsics and self.intrinsics.postprocess == "nanodet":
+            is_nanodet = self.intrinsics and self.intrinsics.postprocess == "nanodet"
+
+            if is_nanodet:
                 from picamera2.devices.imx500 import postprocess_nanodet_detection
                 from picamera2.devices.imx500.postprocess import scale_boxes
                 boxes, scores, classes = postprocess_nanodet_detection(
@@ -170,38 +172,40 @@ class ObjectDetector:
                     max_out_dets=10
                 )[0]
                 boxes = scale_boxes(boxes, 1, 1, input_h, input_w, False, False)
+                raw_boxes = boxes      # nanodet: already fully processed
+                norm_boxes = boxes     # same for fallback
             else:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                # Handle bbox normalization based on model intrinsics
+                # Keep raw boxes for convert_inference_coords (it normalizes internally)
+                raw_boxes = boxes
+
+                # Build normalized yx-order boxes for the manual fallback path
                 bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
-                if bbox_normalization:
-                    boxes = boxes / input_h
-
-                # Handle bbox order (xy vs yx) - YOLOv8 uses xy
                 bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
-                if bbox_order == "xy":
-                    boxes = boxes[:, [1, 0, 3, 2]]
 
-                boxes = np.array_split(boxes, 4, axis=1)
-                boxes = list(zip(*boxes))
+                norm_boxes = boxes.copy()
+                if bbox_normalization:
+                    norm_boxes = norm_boxes / input_h
+                if bbox_order == "xy":
+                    norm_boxes = norm_boxes[:, [1, 0, 3, 2]]
 
             # Get picam2 reference for coordinate conversion
             picam2 = getattr(self, '_picam2', None)
 
             # Convert detections
-            for box, score, category in zip(boxes, scores, classes):
+            for i, (score, category) in enumerate(zip(scores, classes)):
                 if score < self.confidence_threshold:
                     continue
 
                 cls_id = int(category)
                 label = self.labels[cls_id] if cls_id < len(self.labels) else f"class_{cls_id}"
 
-                # Use official convert_inference_coords if picam2 is available
+                # Use official convert_inference_coords with RAW boxes
                 if picam2 is not None:
                     try:
-                        x, y, w, h = self.imx500.convert_inference_coords(box, metadata, picam2)
+                        x, y, w, h = self.imx500.convert_inference_coords(raw_boxes[i], metadata, picam2)
                         detections.append({
                             'label': label,
                             'confidence': float(score),
@@ -214,17 +218,15 @@ class ObjectDetector:
                         })
                         continue
                     except (ValueError, TypeError, IndexError) as e:
-                        # Log first coordinate conversion failure, then fall back silently
-                        if not getattr(self, '_warned_coord_convert', False):
-                            print(f"[Detector] Coordinate conversion failed: {e}, using fallback")
-                            self._warned_coord_convert = True
+                        self._coord_fail_count = getattr(self, '_coord_fail_count', 0) + 1
+                        if self._coord_fail_count <= 3 or self._coord_fail_count % 50 == 0:
+                            print(f"[Detector] Coordinate conversion failed (#{self._coord_fail_count}): {e}, using fallback")
 
-                # Manual coordinate conversion (fallback)
+                # Manual fallback using normalized yx-order boxes
                 frame_h, frame_w = frame.shape[:2]
-                if isinstance(box, (list, tuple)) and len(box) == 4:
-                    y1, x1, y2, x2 = [float(b) for b in box]
-                else:
-                    y1, x1, y2, x2 = box.flatten()
+                box = norm_boxes[i]
+                coords = box.flatten() if hasattr(box, 'flatten') else list(box)
+                y1, x1, y2, x2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
 
                 # Clamp normalized coordinates to valid range [0, 1]
                 y1 = max(0.0, min(1.0, y1))
@@ -232,24 +234,33 @@ class ObjectDetector:
                 y2 = max(0.0, min(1.0, y2))
                 x2 = max(0.0, min(1.0, x2))
 
+                # Ensure min < max (bad inference can swap them)
+                if x1 > x2:
+                    x1, x2 = x2, x1
+                if y1 > y2:
+                    y1, y2 = y2, y1
+
+                bw = int((x2 - x1) * frame_w)
+                bh = int((y2 - y1) * frame_h)
+                if bw <= 0 or bh <= 0:
+                    continue
+
                 detections.append({
                     'label': label,
                     'confidence': float(score),
                     'bbox': {
                         'x': int(x1 * frame_w),
                         'y': int(y1 * frame_h),
-                        'width': int((x2 - x1) * frame_w),
-                        'height': int((y2 - y1) * frame_h)
+                        'width': bw,
+                        'height': bh
                     }
                 })
 
         except (ValueError, TypeError, IndexError, KeyError) as e:
-            # Log specific errors that indicate data format issues
-            if not getattr(self, '_warned_detection_error', False):
-                print(f"[Detector] Detection parsing error: {e}")
-                self._warned_detection_error = True
+            self._parse_fail_count = getattr(self, '_parse_fail_count', 0) + 1
+            if self._parse_fail_count <= 3 or self._parse_fail_count % 50 == 0:
+                print(f"[Detector] Detection parsing error (#{self._parse_fail_count}): {e}")
         except Exception as e:
-            # Log unexpected errors with full details for debugging
             print(f"[Detector] Unexpected detection error: {type(e).__name__}: {e}")
 
         return detections
@@ -302,8 +313,8 @@ class ObjectDetector:
         self._picam2 = None
 
         # Reset warning flags for potential reuse
-        for attr in ['_warned_detection_error', '_warned_metadata_type',
-                     '_warned_coord_convert', '_warned_set_metadata']:
+        for attr in ['_warned_metadata_type', '_warned_set_metadata',
+                     '_coord_fail_count', '_parse_fail_count']:
             if hasattr(self, attr):
                 delattr(self, attr)
 

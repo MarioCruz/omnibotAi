@@ -118,12 +118,20 @@ class LLMCommandGenerator:
 
         commands = self._parse_response(response)
 
+        # Fall back to rules if LLM returned no usable commands
+        if not commands:
+            print(f"[LLM] No valid commands parsed from response, falling back to rules")
+            commands = self._generate_with_rules(objects)
+            mode = 'rules (llm fallback)'
+        else:
+            mode = 'llm'
+
         # Store debug info
         self.last_debug = {
             'prompt': prompt,
             'response': response,
             'parsed_commands': commands,
-            'mode': 'llm',
+            'mode': mode,
             'timestamp': _time.strftime('%H:%M:%S')
         }
 
@@ -322,20 +330,29 @@ Respond with ONLY a JSON object:
         try:
             # Find JSON in response
             json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
-            if json_match:
-                data = json.loads(json_match.group())
-                raw_commands = data.get('commands', [])
+            if not json_match:
+                print(f"[LLM] No JSON found in response: {response[:100]}")
+                return []
 
-                # Validate and convert commands
-                validated = []
-                for cmd in raw_commands:
-                    cmd_lower = cmd.lower().strip()
-                    if cmd_lower in self.robot_commands:
-                        validated.append(self.robot_commands[cmd_lower])
+            data = json.loads(json_match.group())
+            raw_commands = data.get('commands', [])
 
-                return validated
-        except json.JSONDecodeError:
-            pass
+            # Validate and convert commands
+            validated = []
+            rejected = []
+            for cmd in raw_commands:
+                cmd_lower = cmd.lower().strip()
+                if cmd_lower in self.robot_commands:
+                    validated.append(self.robot_commands[cmd_lower])
+                else:
+                    rejected.append(cmd)
+
+            if rejected:
+                print(f"[LLM] Rejected unknown commands: {rejected}")
+
+            return validated
+        except json.JSONDecodeError as e:
+            print(f"[LLM] JSON parse failed: {e} - response: {response[:100]}")
         except Exception as e:
             print(f"[LLM] Parse error: {e}")
 

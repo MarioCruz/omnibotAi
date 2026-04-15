@@ -168,13 +168,7 @@ class AudioCommander:
             self.is_playing = True
             tone = self._generate_tone(frequency, duration_ms)
             sd.play(tone, self.sample_rate, device=self.audio_device)
-            timeout_s = (duration_ms / 1000.0) + 1.0
-            deadline = time.time() + timeout_s
-            while sd.get_stream() and sd.get_stream().active:
-                if time.time() > deadline:
-                    sd.stop()
-                    break
-                time.sleep(0.01)
+            sd.wait()  # Block until playback finishes (simpler and safer)
             self.is_playing = False
             return True
         except Exception as e:
@@ -223,6 +217,11 @@ class AudioCommander:
 
         except subprocess.TimeoutExpired:
             print(f"[AudioCommander] Playback timeout")
+            try:
+                proc.kill()
+                proc.wait(timeout=1)
+            except Exception:
+                pass
             self.is_playing = False
             return False
         except Exception as e:
@@ -359,6 +358,9 @@ class AudioCommander:
         except Exception as e:
             print(f"[AudioCommander] speak error: {e}")
 
+    # Valid pre-recorded phrase names
+    VALID_PHRASES = {'hello', 'yes', 'no', 'thanks', 'omnibot'}
+
     def speak_phrase(self, phrase: str):
         """
         Play a pre-recorded phrase (faster than generating speech).
@@ -366,6 +368,11 @@ class AudioCommander:
         Args:
             phrase: Phrase name (hello, yes, no, thanks, omnibot)
         """
+        # Validate against whitelist to prevent injection
+        if phrase not in self.VALID_PHRASES:
+            print(f"[AudioCommander] Unknown phrase: {phrase}")
+            return
+
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'speak_phrase.sh')
 
         try:

@@ -66,7 +66,7 @@ class EyeDisplay:
     EXPR_LOOKING_DOWN = 'look_down'
     EXPR_BLINK = 'blink'
 
-    def __init__(self, display_type='st7735', dc_pin=24, rst_pin=25, cs_pin=0, spi_port=0, brightness=15):
+    def __init__(self, display_type='st7735', dc_pin=24, rst_pin=25, cs_pin=0, spi_port=0, brightness=15, rotation=0, offset_x=0, offset_y=0):
         """
         Initialize the eye display.
 
@@ -77,8 +77,14 @@ class EyeDisplay:
             rst_pin: GPIO pin for RST (reset)
             cs_pin: SPI chip select (0=CE0, 1=CE1)
             spi_port: SPI bus (0 or 1)
+            rotation: Display rotation in degrees (0, 90, 180, 270)
+            offset_x: Pixel offset to shift eye center horizontally (pre-rotation)
+            offset_y: Pixel offset to shift eye center vertically (pre-rotation)
         """
         self.display_type = display_type
+        self.rotation = rotation % 360  # Normalize to 0/90/180/270
+        self.offset_x = offset_x
+        self.offset_y = offset_y
         self.WIDTH, self.HEIGHT = self.DISPLAY_SIZES.get(display_type, (128, 160))
 
         self.expression = self.EXPR_NORMAL
@@ -230,12 +236,18 @@ class EyeDisplay:
                 # Draw the eye
                 self._draw_eye()
 
-                # Update display
+                # Update display (apply rotation if needed)
                 if self.display:
-                    if self._luma_device:
-                        self._luma_device.display(self.image.convert(self._luma_device.mode))
+                    if self.rotation:
+                        # PIL rotate uses counter-clockwise, so 90° CW = 270° in PIL
+                        display_image = self.image.rotate(-self.rotation, expand=False)
                     else:
-                        self.display.display(self.image)
+                        display_image = self.image
+
+                    if self._luma_device:
+                        self._luma_device.display(display_image.convert(self._luma_device.mode))
+                    else:
+                        self.display.display(display_image)
 
                 time.sleep(0.033)  # ~30 FPS
 
@@ -248,9 +260,9 @@ class EyeDisplay:
         # Clear background
         self.draw.rectangle([0, 0, self.WIDTH, self.HEIGHT], fill=self.BG_COLOR)
 
-        # Eye center
-        cx = self.WIDTH // 2
-        cy = self.HEIGHT // 2
+        # Eye center (with configurable offset for physical alignment)
+        cx = self.WIDTH // 2 + self.offset_x
+        cy = self.HEIGHT // 2 + self.offset_y
 
         with self.lock:
             expression = self.expression

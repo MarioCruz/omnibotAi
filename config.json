@@ -5,6 +5,9 @@
   "eye_rst_pin": 25,
   "eye_cs_pin": 0,
   "eye_brightness": 10,
+  "eye_rotation": 90,
+  "eye_offset_x": 11,
+  "eye_offset_y": 0,
 
   "detector": "imx500",
   "llm_model": "llama-3.1-8b-instant",

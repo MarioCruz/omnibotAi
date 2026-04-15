@@ -24,7 +24,7 @@ sleep 0.2
 
 # Speak using espeak-ng via PipeWire
 echo "Speaking: $TEXT"
-espeak-ng --stdout -a 200 "$TEXT" | pw-play -
+espeak-ng --stdout -a 200 -- "$TEXT" | pw-play -
 
 sleep 0.3
 

@@ -90,7 +90,7 @@ cached_mjpeg_bytes = None
 
 def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', volume=0.5,
                 eye_display_type='st7735', eye_dc_pin=24, eye_rst_pin=25, eye_cs_pin=0, eye_spi_port=0,
-                eye_brightness=15):
+                eye_brightness=15, eye_rotation=0, eye_offset_x=0, eye_offset_y=0):
     """Initialize all system components"""
     global camera, detector, llm, robot
 
@@ -143,6 +143,9 @@ def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', vol
                 cs_pin=eye_cs_pin,
                 spi_port=eye_spi_port,
                 brightness=eye_brightness,
+                rotation=eye_rotation,
+                offset_x=eye_offset_x,
+                offset_y=eye_offset_y,
             )
             eye_display.start()
             print(f"[Dashboard] Eye display started ({eye_display_type})")
@@ -170,7 +173,7 @@ def process_loop():
                 continue
 
             with frame_lock:
-                current_frame = frame.copy()
+                current_frame = frame  # Already a copy from get_frame_and_metadata()
 
             # Detect objects
             detections = []
@@ -205,9 +208,9 @@ def process_loop():
             with frame_lock:
                 annotated_frame = annotated
 
-            # Generate and execute commands ONLY if a mission/task has been set
+            # Generate and execute commands ONLY if a mission/task has been set AND we have detections
             commands = []
-            if system_state['task'] and llm:
+            if system_state['task'] and llm and detections:
                 # Generate commands based on task
                 if system_state['use_llm']:
                     commands = llm.generate_commands(
@@ -218,10 +221,15 @@ def process_loop():
                 else:
                     commands = llm.generate_commands(detections, use_llm=False)
 
-                # Execute commands
+                # Execute commands in background to avoid blocking detection pipeline
                 if commands and robot and robot.connected:
-                    for cmd in commands[:3]:  # Limit to 3 commands per cycle
-                        robot.execute(cmd)
+                    cmds_to_run = commands[:3]
+                    def _run_commands(cmds):
+                        for cmd in cmds:
+                            if not system_state['running']:
+                                break
+                            robot.execute(cmd)
+                    threading.Thread(target=_run_commands, args=(cmds_to_run,), daemon=True).start()
 
             # Update stats
             system_state['last_commands'] = commands[:20]
@@ -262,16 +270,23 @@ def draw_detections(frame, detections):
         w = int(bbox['width'])
         h = int(bbox['height'])
 
+        # Skip invalid bounding boxes
+        if w <= 0 or h <= 0:
+            continue
+
         # Draw box
         cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
-        # Draw label background
+        # Draw label (flip below box if too close to top edge)
         label = f"{det['label']} {det['confidence']:.0%}"
         (label_w, label_h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-        cv2.rectangle(annotated, (x, y - label_h - 10), (x + label_w + 10, y), (0, 255, 0), -1)
-
-        # Draw label text
-        cv2.putText(annotated, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+        if y - label_h - 10 < 0:
+            # Draw below the top of the box
+            cv2.rectangle(annotated, (x, y), (x + label_w + 10, y + label_h + 10), (0, 255, 0), -1)
+            cv2.putText(annotated, label, (x + 5, y + label_h + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+        else:
+            cv2.rectangle(annotated, (x, y - label_h - 10), (x + label_w + 10, y), (0, 255, 0), -1)
+            cv2.putText(annotated, label, (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
 
     # Draw status overlay
     task_text = system_state['task'][:30] if system_state['task'] else 'None'
@@ -292,13 +307,14 @@ def mjpeg_encoder_loop():
         if frame is not None:
             try:
                 # Encode as JPEG once (picamera2 RGB888 is already BGR in memory)
-                _, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                frame_bytes = (b'--frame\r\n'
-                               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
-                with mjpeg_lock:
-                    cached_mjpeg_bytes = frame_bytes
-            except Exception:
-                pass
+                ret, jpeg = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if ret:
+                    frame_bytes = (b'--frame\r\n'
+                                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                    with mjpeg_lock:
+                        cached_mjpeg_bytes = frame_bytes
+            except Exception as e:
+                print(f"[MJPEG] Encode error: {e}")
 
         time.sleep(0.033)  # ~30 FPS
 
@@ -1702,7 +1718,7 @@ def health():
 
 def shutdown_system():
     """Gracefully shutdown all components"""
-    global system_state, camera, robot, eye_display, process_thread
+    global system_state, camera, detector, robot, eye_display, process_thread
     print("\n[Dashboard] Shutting down...")
     system_state['shutdown'] = True
     system_state['running'] = False
@@ -1711,6 +1727,8 @@ def shutdown_system():
         eye_display.stop()
     if robot:
         robot.disconnect()
+    if detector:
+        detector.stop()
     if camera:
         camera.stop()
 
@@ -1746,6 +1764,9 @@ if __name__ == '__main__':
         eye_cs_pin=robot_config.get('eye_cs_pin', 0),
         eye_spi_port=robot_config.get('eye_spi_port', 0),
         eye_brightness=robot_config.get('eye_brightness', 15),
+        eye_rotation=robot_config.get('eye_rotation', 0),
+        eye_offset_x=robot_config.get('eye_offset_x', 0),
+        eye_offset_y=robot_config.get('eye_offset_y', 0),
     )
 
     # Start processing thread
