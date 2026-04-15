@@ -197,27 +197,7 @@ class ObjectDetector:
                 cls_id = int(category)
                 label = self.labels[cls_id] if cls_id < len(self.labels) else f"class_{cls_id}"
 
-                # Use official convert_inference_coords (expects normalized yx-order boxes)
-                if picam2 is not None:
-                    try:
-                        x, y, w, h = self.imx500.convert_inference_coords(boxes[i], metadata, picam2)
-                        detections.append({
-                            'label': label,
-                            'confidence': float(score),
-                            'bbox': {
-                                'x': int(x),
-                                'y': int(y),
-                                'width': int(w),
-                                'height': int(h)
-                            }
-                        })
-                        continue
-                    except (ValueError, TypeError, IndexError) as e:
-                        self._coord_fail_count = getattr(self, '_coord_fail_count', 0) + 1
-                        if self._coord_fail_count <= 3 or self._coord_fail_count % 50 == 0:
-                            print(f"[Detector] Coordinate conversion failed (#{self._coord_fail_count}): {e}, using fallback")
-
-                # Manual fallback using normalized yx-order boxes
+                # Manual coordinate conversion using normalized yx-order boxes
                 frame_h, frame_w = frame.shape[:2]
                 box = boxes[i]
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
