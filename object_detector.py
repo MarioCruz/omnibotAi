@@ -176,8 +176,19 @@ class ObjectDetector:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                # Normalize and swap to yx order per picamera2 API
-                # convert_inference_coords expects preprocessed boxes
+                # Log raw box values once to determine format
+                self._debug_count = getattr(self, '_debug_count', 0) + 1
+                if self._debug_count <= 3:
+                    top_idx = scores > self.confidence_threshold
+                    if top_idx.any():
+                        sample = boxes[top_idx][0]
+                        bbox_norm = self.intrinsics.bbox_normalization if self.intrinsics else None
+                        bbox_ord = self.intrinsics.bbox_order if self.intrinsics else None
+                        print(f"[Detector DEBUG] raw box={sample.tolist()}, input={input_w}x{input_h}, "
+                              f"norm={bbox_norm}, order={bbox_ord}")
+                        # Store for websocket access
+                        self._debug_raw = sample.tolist()
+
                 bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
                 bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
 
@@ -186,10 +197,8 @@ class ObjectDetector:
                 if bbox_order == "xy":
                     boxes = boxes[:, [1, 0, 3, 2]]
 
-            # Get picam2 reference for coordinate conversion
-            picam2 = getattr(self, '_picam2', None)
-
             # Convert detections
+            frame_h, frame_w = frame.shape[:2]
             for i, (score, category) in enumerate(zip(scores, classes)):
                 if score < self.confidence_threshold:
                     continue
@@ -197,8 +206,6 @@ class ObjectDetector:
                 cls_id = int(category)
                 label = self.labels[cls_id] if cls_id < len(self.labels) else f"class_{cls_id}"
 
-                # Manual coordinate conversion using normalized yx-order boxes
-                frame_h, frame_w = frame.shape[:2]
                 box = boxes[i]
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
                 y1, x1, y2, x2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
@@ -209,7 +216,6 @@ class ObjectDetector:
                 y2 = max(0.0, min(1.0, y2))
                 x2 = max(0.0, min(1.0, x2))
 
-                # Ensure min < max (bad inference can swap them)
                 if x1 > x2:
                     x1, x2 = x2, x1
                 if y1 > y2:
@@ -217,8 +223,20 @@ class ObjectDetector:
 
                 bw = int((x2 - x1) * frame_w)
                 bh = int((y2 - y1) * frame_h)
-                if bw <= 0 or bh <= 0:
-                    continue
+
+                # DEBUG: emit even if zero-sized so we can see what's happening
+                detections.append({
+                    'label': label,
+                    'confidence': float(score),
+                    'bbox': {
+                        'x': int(x1 * frame_w),
+                        'y': int(y1 * frame_h),
+                        'width': max(1, bw),
+                        'height': max(1, bh)
+                    },
+                    '_debug_raw': [float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])],
+                    '_debug_frame': [frame_w, frame_h]
+                })
 
                 detections.append({
                     'label': label,
