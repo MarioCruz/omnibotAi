@@ -172,24 +172,19 @@ class ObjectDetector:
                     max_out_dets=10
                 )[0]
                 boxes = scale_boxes(boxes, 1, 1, input_h, input_w, False, False)
-                raw_boxes = boxes      # nanodet: already fully processed
-                norm_boxes = boxes     # same for fallback
             else:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                # Keep raw boxes for convert_inference_coords (it normalizes internally)
-                raw_boxes = boxes
-
-                # Build normalized yx-order boxes for the manual fallback path
+                # Normalize and swap to yx order per picamera2 API
+                # convert_inference_coords expects preprocessed boxes
                 bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
                 bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
 
-                norm_boxes = boxes.copy()
                 if bbox_normalization:
-                    norm_boxes = norm_boxes / input_h
+                    boxes = boxes / input_h
                 if bbox_order == "xy":
-                    norm_boxes = norm_boxes[:, [1, 0, 3, 2]]
+                    boxes = boxes[:, [1, 0, 3, 2]]
 
             # Get picam2 reference for coordinate conversion
             picam2 = getattr(self, '_picam2', None)
@@ -202,10 +197,10 @@ class ObjectDetector:
                 cls_id = int(category)
                 label = self.labels[cls_id] if cls_id < len(self.labels) else f"class_{cls_id}"
 
-                # Use official convert_inference_coords with RAW boxes
+                # Use official convert_inference_coords (expects normalized yx-order boxes)
                 if picam2 is not None:
                     try:
-                        x, y, w, h = self.imx500.convert_inference_coords(raw_boxes[i], metadata, picam2)
+                        x, y, w, h = self.imx500.convert_inference_coords(boxes[i], metadata, picam2)
                         detections.append({
                             'label': label,
                             'confidence': float(score),
@@ -224,7 +219,7 @@ class ObjectDetector:
 
                 # Manual fallback using normalized yx-order boxes
                 frame_h, frame_w = frame.shape[:2]
-                box = norm_boxes[i]
+                box = boxes[i]
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
                 y1, x1, y2, x2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
 
