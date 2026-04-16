@@ -340,6 +340,27 @@ Person RIGHT of center →  turn right (750ms)
 Person fills >60%      →  stop (close enough)
 ```
 
+### Why Rules Instead of LLM?
+
+We tested cloud LLMs (Groq) for navigation and found they don't work for real-time robot control:
+
+| | Rule-Based | LLM (Groq Llama 3.1 8B) | LLM (Groq Llama 3.3 70B) |
+|--|-----------|--------------------------|--------------------------|
+| **Latency** | ~0ms | ~15s per decision | ~15s per decision |
+| **Accuracy** | Correct (uses bbox math) | Always returned "right" | Always returned "right" |
+| **Behavior** | Approaches target, stops when close | Robot spins in circles | Robot spins in circles |
+
+Both LLM models ignored the actual object position data in the prompt and always returned
+`{"commands": ["right"]}` regardless of whether the person was left, center, or right of frame.
+The 15-second API latency also made the dashboard unresponsive and the robot blind between decisions.
+
+The rule-based engine uses actual bounding box coordinates — if the person's center pixel is
+left of frame center, turn left; if centered, go forward; if filling >60% of frame, stop.
+It makes correct decisions instantly every ~2 seconds.
+
+The `llm_command_generator.py` module is kept in the repo for potential future features like
+scene description or voice interaction, where latency is acceptable and position math isn't needed.
+
 ### Task Log
 
 All navigation decisions are logged to `logs/task.log` for debugging:
