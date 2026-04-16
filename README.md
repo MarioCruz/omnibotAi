@@ -1,10 +1,10 @@
 # OmniAI - Raspberry Pi AI Robot Control System
 
-AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLOv8 hardware-accelerated detection**, rule-based navigation, and real-time object detection.
+AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLO11 hardware-accelerated detection**, rule-based navigation, and real-time object detection.
 
 ## Features
 
-- **Hardware-Accelerated AI**: YOLOv8 runs directly on the IMX500 camera chip (~17ms inference, ~30fps)
+- **Hardware-Accelerated AI**: YOLO11 runs directly on the IMX500 camera chip (~17ms inference, ~30fps)
 - **Real-time Object Detection**: 80 COCO classes including people, animals, vehicles, household items
 - **Rule-Based Navigation**: Instant position-math navigation — turn to face target, approach, stop when close
 - **Tomy Omnibot Control**: Audio frequency-based robot control via Bluetooth
@@ -37,13 +37,12 @@ sudo apt install -y libcap-dev python3-dev python3-venv libportaudio2 portaudio1
 sudo reboot
 ```
 
-### 2. Install YOLOv8 Model
+### 2. Install YOLO11 Model
 
-The YOLOv8 model isn't included in the default package - download it:
+The YOLO11 model is included in the `imx500-models` package. Verify it exists:
 
 ```bash
-cd /usr/share/imx500-models
-sudo wget https://github.com/raspberrypi/imx500-models/raw/main/imx500_network_yolov8n_pp.rpk
+ls /usr/share/imx500-models/imx500_network_yolo11n_pp.rpk
 ```
 
 ### 3. Setup Project
@@ -82,7 +81,7 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 - **Model Upload**: Neural network firmware is uploaded directly to the camera chip
 - **Hardware Inference**: Detection runs on dedicated AI silicon, NOT on Pi's CPU
 - **Performance**: ~17ms inference time, ~30fps real-time detection
-- **YOLOv8**: Best accuracy for object detection (640x640 input, 80 COCO classes)
+- **YOLO11**: Best accuracy for object detection (640x640 input, 80 COCO classes)
 
 ### How It Works
 
@@ -112,7 +111,7 @@ omniai/
 ├── dashboard.py              # Web dashboard with live stream + robot control
 ├── navigation.py             # Rule-based navigation engine (replaces LLM)
 ├── camera_capture.py         # Thread-safe camera capture with IMX500 support
-├── object_detector.py        # Multi-backend detection (IMX500 YOLOv8 default)
+├── object_detector.py        # Multi-backend detection (IMX500 YOLO11 default)
 ├── robot_executor.py         # Robot command executor (audio tones + speech)
 ├── audio_commander.py        # Audio frequency generator + speech (thread-safe)
 ├── eye_display.py            # Animated eye display (ST7735S TFT / SSD1351 OLED)
@@ -139,7 +138,8 @@ omniai/
 
 | Model | File | Input | Speed | Accuracy |
 |-------|------|-------|-------|----------|
-| **YOLOv8 nano** | `imx500_network_yolov8n_pp.rpk` | 640x640 | Good | **Best** |
+| **YOLO11 nano** | `imx500_network_yolo11n_pp.rpk` | 640x640 | Good | **Best** |
+| YOLOv8 nano | `imx500_network_yolov8n_pp.rpk` | 640x640 | Good | Good |
 | MobileNet SSD | `imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk` | 320x320 | **Fastest** | Good |
 | NanoDet Plus | `imx500_network_nanodet_plus_416x416_pp.rpk` | 416x416 | Good | Good |
 | EfficientDet | `imx500_network_efficientdet_lite0_pp.rpk` | Various | Medium | Good |
@@ -328,7 +328,7 @@ decisions (~0ms) compared to the 15s latency with cloud LLMs.
 
 ### How It Works
 
-1. Camera detects objects via IMX500 YOLOv8 (80 COCO classes)
+1. Camera detects objects via IMX500 YOLO11 (80 COCO classes)
 2. Navigation engine picks the highest-confidence target
 3. Calculates target position relative to frame center
 4. Issues ONE command per cycle: turn left, turn right, forward, or stop
@@ -351,11 +351,10 @@ NAV target=person (73%) pos=x:140 cx:346 frame_cx:320 | person fills 64% -> STOP
 
 ## Troubleshooting
 
-### YOLOv8 model not found
+### YOLO model not found
 ```bash
-# Download it manually
-cd /usr/share/imx500-models
-sudo wget https://github.com/raspberrypi/imx500-models/raw/main/imx500_network_yolov8n_pp.rpk
+# Reinstall the models package
+sudo apt install --reinstall imx500-models
 ```
 
 ### Camera not working
@@ -370,7 +369,7 @@ vcgencmd get_camera
 3. Ensure good lighting - AI cameras need decent light
 
 ### Slow performance
-- YOLOv8 runs at ~30fps on IMX500 hardware
+- YOLO11 runs at ~30fps on IMX500 hardware
 - If slower, check if running other processes
 - Try MobileNet SSD for faster (but less accurate) detection
 
@@ -404,7 +403,7 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' \
 
 ## Future: Custom Model Training
 
-Currently using pre-trained YOLOv8 with 80 COCO classes. The IMX500 ecosystem supports training custom models to recognize specific objects (e.g., "Mario's shoes" instead of generic "shoes").
+Currently using pre-trained YOLO11 with 80 COCO classes. The IMX500 ecosystem supports training custom models to recognize specific objects (e.g., "Mario's shoes" instead of generic "shoes").
 
 See: [Streamline dataset creation for the Raspberry Pi AI Camera](https://www.raspberrypi.com/news/streamline-dataset-creation-for-the-raspberry-pi-ai-camera/)
 

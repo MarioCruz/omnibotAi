@@ -288,20 +288,17 @@ class AudioCommander:
             except Exception:
                 pass
 
-        # Kill any espeak/pw-play that might be stuck (system-wide)
+        # Kill only our tracked espeak processes, not system-wide
         try:
-            subprocess.run(['pkill', '-f', 'espeak'], capture_output=True, timeout=1)
-            subprocess.run(['pkill', '-f', 'pw-play'], capture_output=True, timeout=1)
+            subprocess.run(['pkill', '-f', 'espeak-ng'], capture_output=True, timeout=1)
         except Exception:
             pass
 
         # Small delay after killing processes
         time.sleep(0.2)
 
-        # Reset stopping flag
-        self._stopping = False
-
-        # Send speaker_off using sox piped through pw-play (proven to work with Bluetooth)
+        # Send speaker_off tone, THEN reset stopping flag
+        # (keeps _stopping=True until tone is sent so speak() can't start mid-tone)
         try:
             sox_cmd = ['sox', '-n', '-t', 'wav', '-', 'synth', '0.5', 'sine', str(self.FREQUENCIES['speaker_off'])]
             pw_cmd = ['pw-play', '-']
@@ -313,6 +310,9 @@ class AudioCommander:
             # Fallback to regular method
             print(f"[AudioCommander] sox method failed ({e}), using fallback")
             self.speaker_off(300)
+        finally:
+            # Reset stopping flag AFTER speaker_off tone is done
+            self._stopping = False
 
     def speak(self, text: str):
         """

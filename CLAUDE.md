@@ -48,7 +48,7 @@ sudo reboot
 
 ## IMX500 AI Camera - Official picamera2 API
 
-The IMX500 is a smart camera with an on-chip neural network accelerator. The model firmware is uploaded directly to the camera chip, and inference runs on dedicated hardware - NOT on the Pi's CPU.
+The IMX500 is a smart camera with an on-chip neural network accelerator. Uses YOLO11 nano (upgraded from YOLOv8). The model firmware is uploaded directly to the camera chip, and inference runs on dedicated hardware - NOT on the Pi's CPU.
 
 ### Key Concepts
 
@@ -57,7 +57,7 @@ The IMX500 is a smart camera with an on-chip neural network accelerator. The mod
 3. **NetworkIntrinsics**: Model metadata (task type, inference rate, bbox format) embedded in the .rpk file
 4. **Coordinate Conversion**: Use `imx500.convert_inference_coords()` for accurate bounding box mapping
 
-### Official Python Usage (YOLOv8)
+### Official Python Usage (YOLO11)
 
 ```python
 from picamera2 import MappedArray, Picamera2
@@ -65,7 +65,7 @@ from picamera2.devices import IMX500
 from picamera2.devices.imx500 import NetworkIntrinsics
 
 # Initialize IMX500 with model (uploads firmware to camera chip)
-model_path = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
+model_path = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 imx500 = IMX500(model_path)
 
 # Get model intrinsics (inference rate, bbox format, etc.)
@@ -108,7 +108,7 @@ while True:
         input_w, input_h = imx500.get_input_size()
         boxes = boxes / input_h
 
-    if intrinsics.bbox_order == "xy":  # YOLOv8 uses xy order
+    if intrinsics.bbox_order == "xy":  # YOLO uses xy order
         boxes = boxes[:, [1, 0, 3, 2]]
 
     # Convert to screen coordinates
@@ -147,19 +147,16 @@ while True:
 
 ### Available IMX500 Models
 
-**Object Detection (recommended: YOLOv8):**
+**Object Detection (recommended: YOLO11):**
 | Model | File | Notes |
 |-------|------|-------|
-| **YOLOv8 nano** | `imx500_network_yolov8n_pp.rpk` | Best accuracy, 640x640 input |
+| **YOLO11 nano** | `imx500_network_yolo11n_pp.rpk` | Best accuracy, 640x640 input |
+| YOLOv8 nano | `imx500_network_yolov8n_pp.rpk` | Previous default, 640x640 input |
 | SSD MobileNetV2 | `imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk` | Fastest, 320x320 input |
 | NanoDet Plus | `imx500_network_nanodet_plus_416x416_pp.rpk` | Balanced, needs postprocess |
 | EfficientDet Lite-0 | `imx500_network_efficientdet_lite0_pp.rpk` | Good accuracy |
 
-**Installing YOLOv8 model (not in default apt package):**
-```bash
-cd /usr/share/imx500-models
-sudo wget https://github.com/raspberrypi/imx500-models/raw/main/imx500_network_yolov8n_pp.rpk
-```
+**YOLO11 is included in the imx500-models package (no manual download needed).**
 
 **Classification:**
 - `imx500_network_efficientnet_bo.rpk`
@@ -179,9 +176,9 @@ sudo wget https://github.com/raspberrypi/imx500-models/raw/main/imx500_network_y
 git clone https://github.com/raspberrypi/picamera2.git
 cd picamera2/examples/imx500
 
-# Run YOLOv8 detection
+# Run YOLO11 detection
 python imx500_object_detection_demo.py \
-    --model /usr/share/imx500-models/imx500_network_yolov8n_pp.rpk \
+    --model /usr/share/imx500-models/imx500_network_yolo11n_pp.rpk \
     --ignore-dash-labels -r
 ```
 
@@ -320,7 +317,7 @@ sox (generate sine) → pw-play → PipeWire → Bluetooth → Robot Speaker
 rpicam-hello -t 5s
 vcgencmd get_camera
 
-# Test IMX500 with YOLOv8
+# Test IMX500 with YOLO11
 python test_detection.py  # Opens https://omniai.local:8080
 
 # Check Pi temperature
@@ -376,11 +373,11 @@ python robot_executor.py
 
 ## Module API Reference
 
-### ObjectDetector (IMX500 YOLOv8)
+### ObjectDetector (IMX500 YOLO11)
 ```python
 from object_detector import ObjectDetector
 
-# Uses YOLOv8 by default for best accuracy
+# Uses YOLO11 by default for best accuracy
 detector = ObjectDetector(backend='imx500')
 
 # Or specify a different model

@@ -107,39 +107,39 @@ class RobotCommandExecutor:
         if not self.connected or not self.audio:
             return CommandResult(False, "Not connected")
 
-        command = command.strip().lower()
+        command = command.strip()
+        cmd_lower = command.lower()
 
         try:
             # Movement commands
-            if command == 'forward':
+            if cmd_lower == 'forward':
                 self.audio.forward(self.step_duration)
                 return CommandResult(True, "Moving forward")
 
-            elif command == 'backward':
+            elif cmd_lower == 'backward':
                 self.audio.backward(self.step_duration)
                 return CommandResult(True, "Moving backward")
 
-            elif command == 'left':
+            elif cmd_lower == 'left':
                 self.audio.left(self.turn_duration)
                 return CommandResult(True, "Turning left")
 
-            elif command == 'right':
+            elif cmd_lower == 'right':
                 self.audio.right(self.turn_duration)
                 return CommandResult(True, "Turning right")
 
-            elif command == 'stop':
+            elif cmd_lower == 'stop':
                 self._cancel_pattern = True  # Cancel any running pattern
                 self.audio.stop()
                 return CommandResult(True, "Stopped")
 
             # Pattern commands
-            elif command in self.patterns:
-                self._run_pattern(command)
-                return CommandResult(True, f"Running pattern: {command}")
+            elif cmd_lower in self.patterns:
+                self._run_pattern(cmd_lower)
+                return CommandResult(True, f"Running pattern: {cmd_lower}")
 
-            # Speech commands
-            elif command.startswith('speaktext('):
-                # Extract text from speakText("...")
+            # Speech commands — use original `command` to preserve text casing
+            elif cmd_lower.startswith('speaktext('):
                 start = command.find('"') + 1
                 end = command.rfind('"')
                 if start > 0 and end > start:
@@ -149,8 +149,7 @@ class RobotCommandExecutor:
                 return CommandResult(False, "Invalid speakText format")
 
             # Pre-recorded phrase commands (faster)
-            elif command.startswith('phrase('):
-                # Extract phrase name from phrase("...")
+            elif cmd_lower.startswith('phrase('):
                 start = command.find('"') + 1
                 end = command.rfind('"')
                 if start > 0 and end > start:
@@ -160,13 +159,13 @@ class RobotCommandExecutor:
                 return CommandResult(False, "Invalid phrase format")
 
             # Step commands with direction
-            elif command.startswith('step('):
+            elif cmd_lower.startswith('step('):
                 direction = command[5:-1].strip('"\'')
                 return self.execute(direction)
 
             # Run pattern commands
-            elif command.startswith('runpattern('):
-                pattern = command[11:-1].strip('"\'')
+            elif cmd_lower.startswith('runpattern('):
+                pattern = cmd_lower[11:-1].strip('"\'')
                 if pattern in self.patterns:
                     self._run_pattern(pattern)
                     return CommandResult(True, f"Running pattern: {pattern}")

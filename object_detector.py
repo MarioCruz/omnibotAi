@@ -13,8 +13,8 @@ from functools import lru_cache
 class ObjectDetector:
     """Object detector with IMX500 hardware acceleration using official picamera2 API"""
 
-    # Default to YOLOv8 for proven performance
-    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk'
+    # YOLO11 nano with on-chip post-processing (upgraded from YOLOv8)
+    DEFAULT_MODEL = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 
     def __init__(self, backend='imx500', model_path=None, confidence_threshold=0.3):
         self.backend = backend

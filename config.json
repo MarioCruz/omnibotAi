@@ -10,7 +10,6 @@
   "eye_offset_y": 0,
 
   "detector": "imx500",
-  "llm_model": "llama-3.3-70b-versatile",
   "volume": 0.5,
   "port": 8080
 }

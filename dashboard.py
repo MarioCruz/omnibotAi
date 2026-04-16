@@ -101,7 +101,7 @@ def init_system(detector_backend='imx500', volume=0.5,
                 eye_display_type='st7735', eye_dc_pin=24, eye_rst_pin=25, eye_cs_pin=0, eye_spi_port=0,
                 eye_brightness=15, eye_rotation=0, eye_offset_x=0, eye_offset_y=0):
     """Initialize all system components"""
-    global camera, detector, llm, robot
+    global camera, detector, robot
 
     print("[Dashboard] Initializing system...")
 

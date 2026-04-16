@@ -98,9 +98,10 @@ class CameraCapture:
                 frame = job.make_array("main")
                 metadata = job.get_metadata()
 
-                # Store data BEFORE releasing the request
+                # Copy frame before release — make_array may return a view into
+                # the request buffer which becomes invalid after job.release()
                 with self.frame_lock:
-                    self.current_frame = frame
+                    self.current_frame = frame.copy()
                     self.current_metadata = metadata
 
                 frames_this_second += 1
