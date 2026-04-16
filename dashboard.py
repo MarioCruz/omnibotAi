@@ -6,6 +6,7 @@ Live camera stream with detection overlays, LLM commands, and robot controls
 
 import io
 import json
+import logging
 import subprocess
 import threading
 import time
@@ -13,6 +14,15 @@ import os
 import cv2
 import numpy as np
 from flask import Flask, Response, render_template_string, jsonify, request
+
+# Task logging — captures every decision cycle when a mission is active
+task_logger = logging.getLogger('task')
+task_logger.setLevel(logging.DEBUG)
+_log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+os.makedirs(_log_dir, exist_ok=True)
+_task_handler = logging.FileHandler(os.path.join(_log_dir, 'task.log'))
+_task_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
+task_logger.addHandler(_task_handler)
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit
 
@@ -211,8 +221,17 @@ def process_loop():
             # Generate and execute commands ONLY if a mission/task has been set AND we have detections
             commands = []
             if system_state['task'] and llm and detections:
+                # Log detections for this cycle
+                det_summary = ', '.join(
+                    f"{d['label']}({d['confidence']:.0%} x:{d['bbox']['x']} y:{d['bbox']['y']} w:{d['bbox']['width']} h:{d['bbox']['height']})"
+                    for d in detections[:5]
+                )
+                task_logger.debug(f"DETECT [{system_state['task']}] {det_summary}")
+
                 # Skip if robot is still executing previous commands
-                if not getattr(process_loop, '_executing', False):
+                if getattr(process_loop, '_executing', False):
+                    task_logger.debug("SKIP busy executing previous commands")
+                else:
                     # Generate commands based on task
                     if system_state['use_llm']:
                         commands = llm.generate_commands(
@@ -223,10 +242,18 @@ def process_loop():
                     else:
                         commands = llm.generate_commands(detections, use_llm=False)
 
+                    # Log command generation details
+                    debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
+                    task_logger.info(
+                        f"CMD mode={debug.get('mode','?')} commands={commands} "
+                        f"response={debug.get('response','')[:150]}"
+                    )
+
                     # Execute commands in background to avoid blocking detection pipeline
                     if commands and robot and robot.connected:
                         cmds_to_run = commands[:3]
                         process_loop._executing = True
+                        task_logger.info(f"EXEC {cmds_to_run}")
                         def _run_commands(cmds):
                             try:
                                 for cmd in cmds:
@@ -235,6 +262,7 @@ def process_loop():
                                     robot.execute(cmd)
                             finally:
                                 process_loop._executing = False
+                                task_logger.debug("EXEC done")
                         threading.Thread(target=_run_commands, args=(cmds_to_run,), daemon=True).start()
 
             # Update stats
@@ -1632,6 +1660,8 @@ def api_start():
 @app.route('/api/stop', methods=['POST'])
 def api_stop():
     system_state['running'] = False
+    if system_state['task']:
+        task_logger.info(f"=== TASK STOPPED: {system_state['task']} ===")
     system_state['task'] = None  # Clear task to stop autonomous commands
     if robot:
         robot.stop()
@@ -1648,6 +1678,7 @@ def api_pause():
 def api_task():
     data = request.json or {}
     system_state['task'] = data.get('task', 'Explore')
+    task_logger.info(f"=== TASK SET: {system_state['task']} ===")
     return jsonify({'status': 'ok', 'task': system_state['task']})
 
 
