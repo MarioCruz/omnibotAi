@@ -1,15 +1,16 @@
 # OmniAI - Raspberry Pi AI Robot Control System
 
-AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLOv8 hardware-accelerated detection**, cloud LLM (Groq), and real-time object detection.
+AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLOv8 hardware-accelerated detection**, rule-based navigation, and real-time object detection.
 
 ## Features
 
 - **Hardware-Accelerated AI**: YOLOv8 runs directly on the IMX500 camera chip (~17ms inference, ~30fps)
 - **Real-time Object Detection**: 80 COCO classes including people, animals, vehicles, household items
-- **Cloud LLM Integration**: Groq-powered command generation (Llama 3.1 8B) - fast and free tier available
-- **Local LLM Fallback**: Optional Ollama support (Mistral, Phi, TinyLlama)
-- **Tomy Omnibot Control**: Audio frequency-based robot control
-- **Web Dashboard**: Live MJPEG stream with detection overlays and controls
+- **Rule-Based Navigation**: Instant position-math navigation — turn to face target, approach, stop when close
+- **Tomy Omnibot Control**: Audio frequency-based robot control via Bluetooth
+- **Web Dashboard**: Live MJPEG stream with bounding boxes, navigation log, and controls
+- **Kids Dashboard**: Simplified colorful interface with mission buttons
+- **Eye Display**: Animated OLED/TFT eye with expressions (happy, surprised, sleepy, angry)
 - **Thread-Safe Camera**: Robust multi-threaded capture with proper resource management
 
 ## Hardware Requirements
@@ -58,13 +59,9 @@ source venv/bin/activate
 # Install dependencies
 pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice
 
-# Set up Groq API key (recommended - fast cloud LLM)
-echo "GROQ_API_KEY=your_api_key_here" > .env
-# Get free API key at https://console.groq.com
-
-# OR install Ollama for local LLM (optional)
-curl https://ollama.ai/install.sh | sh
-ollama pull mistral
+# Optional: Set up Groq API key (for future LLM features like scene description)
+# echo "GROQ_API_KEY=your_api_key_here" > .env
+# Navigation uses rule-based math — no LLM needed
 ```
 
 ### 4. Run
@@ -74,7 +71,7 @@ ollama pull mistral
 python test_detection.py
 # Open https://omniai.local:8080
 
-# Full dashboard with LLM and robot control
+# Full dashboard with navigation and robot control
 python dashboard.py --port 8080
 ```
 
@@ -113,23 +110,27 @@ The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key
 ```
 omniai/
 ├── dashboard.py              # Web dashboard with live stream + robot control
+├── navigation.py             # Rule-based navigation engine (replaces LLM)
 ├── camera_capture.py         # Thread-safe camera capture with IMX500 support
 ├── object_detector.py        # Multi-backend detection (IMX500 YOLOv8 default)
-├── llm_command_generator.py  # Cloud (Groq) + local (Ollama) LLM integration
 ├── robot_executor.py         # Robot command executor (audio tones + speech)
 ├── audio_commander.py        # Audio frequency generator + speech (thread-safe)
-├── eye_display.py            # ST7735S TFT animated eye display
+├── eye_display.py            # Animated eye display (ST7735S TFT / SSD1351 OLED)
+├── llm_command_generator.py  # LLM integration (kept for future scene description)
+├── config.json               # Hardware and display configuration
 ├── speak_pi.sh               # Text-to-speech script (Pi - espeak + pw-play)
 ├── speak_phrase.sh           # Pre-recorded phrase player (Pi)
 ├── speak.sh                  # Text-to-speech script (macOS - for testing)
 ├── audio_phrases/            # Pre-recorded WAV files for fast speech
 │   ├── hello.wav, yes.wav, no.wav, thanks.wav, omnibot.wav
+├── logs/                     # Runtime logs (gitignored)
+│   └── task.log              # Navigation decision log
 ├── util/                     # Test scripts and utilities
 │   ├── test_eye_display.py   # Eye display test
 │   ├── test_detection.py     # Camera/detection test
+│   ├── test_oled_brightness.py # OLED brightness calibration
 │   ├── generate_certs.sh     # SSL certificate generator
 │   └── start.sh              # Quick start script
-├── .env                      # API keys (GROQ_API_KEY)
 ├── CLAUDE.md                 # Technical reference for Claude Code
 └── README.md                 # This file
 ```
@@ -191,9 +192,9 @@ bluetoothctl
 > connect XX:XX:XX:XX:XX:XX
 ```
 
-## Eye Display (ST7735S TFT)
+## Eye Display (ST7735S TFT / SSD1351 OLED)
 
-Animated robot eye on a 1.8" ST7735S TFT display (128x160 RGB) for personality.
+Animated robot eye on ST7735S 1.8" TFT (128x160) or SSD1351 1.5" OLED (128x128). Configurable via `config.json`.
 
 ### Wiring
 
@@ -267,13 +268,12 @@ eye.blink()
 
 ### Main Dashboard (`/`)
 - **Live Camera Stream**: MJPEG with detection bounding boxes
-- **Object Detection Panel**: Real-time list of detected objects
-- **Detection History**: Log of all detections with timestamps
+- **Navigation Log**: Real-time decisions — target, action (FORWARD/LEFT/RIGHT/STOP), reason
+- **Detection History**: Log of detected objects with timestamps
 - **Manual Robot Controls**: Movement buttons, patterns, speech
 - **Speech Buttons**: Hello, Yes, No, Thanks (pre-recorded phrases)
-- **Speaker Off Button**: 🔇 Kills speech and resets robot speaker
-- **Statistics**: FPS, inference time, detection count
-- **LLM Debug Panel**: Shows prompts and AI responses
+- **Speaker Off Button**: Kills speech and resets robot speaker
+- **Statistics**: Iterations, FPS, detection count, command count
 - **Bluetooth Status**: Connection indicator
 
 ### Kids Dashboard (`/kids`)
@@ -295,7 +295,7 @@ eye.blink()
 | `/api/start` | POST | Start AI system |
 | `/api/stop` | POST | Stop AI system |
 | `/api/command` | POST | Send robot command |
-| `/api/task` | POST | Set LLM task context |
+| `/api/task` | POST | Set navigation task (e.g., "Find the person") |
 | `/api/bluetooth` | GET | Bluetooth connection status |
 
 ### Robot Commands via `/api/command`
@@ -321,36 +321,32 @@ eye.blink()
 {"command": "speaker_off"}
 ```
 
-## LLM Options
+## Navigation
 
-### Cloud LLM (Recommended): Groq
+The robot navigates using **rule-based position math** — no LLM required. This gives instant
+decisions (~0ms) compared to the 15s latency with cloud LLMs.
 
-Groq provides fast, free-tier access to Llama 3.1 8B - much faster than running locally on Pi.
+### How It Works
 
-```bash
-# Set up API key
-echo "GROQ_API_KEY=your_key_here" > .env
-# Get free key at https://console.groq.com
+1. Camera detects objects via IMX500 YOLOv8 (80 COCO classes)
+2. Navigation engine picks the highest-confidence target
+3. Calculates target position relative to frame center
+4. Issues ONE command per cycle: turn left, turn right, forward, or stop
+
+```
+Person LEFT of center  →  turn left (750ms)
+Person CENTERED        →  forward (500ms)
+Person RIGHT of center →  turn right (750ms)
+Person fills >60%      →  stop (close enough)
 ```
 
-| Model | Provider | Latency | Quality |
-|-------|----------|---------|---------|
-| `llama-3.1-8b-instant` | Groq | **~100ms** | **Best** |
-| `mistral` | Ollama (local) | ~2-5s | Good |
-| `phi` | Ollama (local) | ~1-3s | Good |
-| `tinyllama` | Ollama (local) | ~500ms | Basic |
+### Task Log
 
-### Local LLM (Optional): Ollama
-
-For offline operation or privacy:
-
-```bash
-# Install Ollama
-curl https://ollama.ai/install.sh | sh
-ollama pull mistral
-
-# Use local LLM (set use_cloud=False in code)
-python dashboard.py --llm-model mistral
+All navigation decisions are logged to `logs/task.log` for debugging:
+```
+NAV target=person (73%) pos=x:197 cx:345 frame_cx:320 | person CENTERED -> forward
+NAV target=person (78%) pos=x:0 cx:140 frame_cx:320   | person LEFT -> turn left
+NAV target=person (73%) pos=x:140 cx:346 frame_cx:320 | person fills 64% -> STOP
 ```
 
 ## Troubleshooting

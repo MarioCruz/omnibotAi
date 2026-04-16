@@ -18,7 +18,7 @@ The robot is controlled via audio frequency tones sent through speaker/Bluetooth
 
 ### Default Durations
 - Step (forward/backward): 500ms
-- Turn (90 degrees): 3000ms
+- Turn (course correction): 750ms
 
 ## Raspberry Pi 5 Setup
 
@@ -199,45 +199,46 @@ keyboard, cell phone, microwave, oven, toaster, sink, refrigerator,
 book, clock, vase, scissors, teddy bear, hair drier, toothbrush
 ```
 
-## Cloud LLM Setup (Recommended): Groq
+## Navigation (Rule-Based)
 
-Groq provides fast, free-tier access to Llama 3.1 8B - much faster than local inference on Pi.
+Navigation uses rule-based position math instead of LLM. The LLM approach was tested
+(Groq Llama 3.1 8B and 3.3 70B) but both always returned "right" regardless of actual
+object position and added 15s latency per decision. Rule-based is instant and correct.
+
+### How It Works
+1. Pick highest-confidence target from detections
+2. If target is LEFT of center → turn left
+3. If target is RIGHT of center → turn right
+4. If target is CENTERED → move forward
+5. If target fills >60% of frame → stop (close enough)
+
+### NavigationEngine
+```python
+from navigation import NavigationEngine
+
+nav = NavigationEngine(frame_width=640, frame_height=480)
+commands = nav.generate_commands(detections, context="Find the person")
+# Returns: ['step("forward")'] or ['step("left")'] etc.
+```
+
+### Task Logging
+Navigation decisions are logged to `logs/task.log`:
+```
+NAV target=person (73%) pos=x:197 cx:345 frame_cx:320 commands=['step("forward")'] | person CENTERED -> forward
+NAV target=person (78%) pos=x:0 cx:140 frame_cx:320 commands=['step("left")'] | person LEFT -> turn left
+NAV target=person (73%) pos=x:140 cx:346 frame_cx:320 commands=['step("stop")'] | person fills 64% -> STOP
+```
+
+## LLM Setup (Optional - for future "describe scene" feature)
+
+Groq API key can be set for potential future features (scene description, voice interaction):
 
 ```bash
-# Set API key in .env file
 echo "GROQ_API_KEY=your_api_key_here" > .env
-
 # Get free API key at https://console.groq.com
 ```
 
-### Groq API Details
-- **Endpoint**: `https://api.groq.com/openai/v1/chat/completions`
-- **Model**: `llama-3.1-8b-instant` (fast, good quality)
-- **Latency**: ~100ms (vs 2-5s for local Ollama)
-- **Free tier**: Available with rate limits
-
-## Local LLM Setup (Optional): Ollama
-
-For offline operation or when cloud isn't available:
-
-```bash
-# Install
-curl https://ollama.ai/install.sh | sh
-
-# Pull model
-ollama pull mistral
-
-# Test
-ollama run mistral "Say hello"
-
-# Check status
-curl http://localhost:11434/api/tags
-```
-
-### Recommended Local Models for Pi 5 (16GB)
-- `mistral` - 4.1GB, best quality
-- `phi` - 1.6GB, faster
-- `tinyllama` - 637MB, fastest
+The `llm_command_generator.py` module is kept in the repo but is not used for navigation.
 
 ## Available Robot Commands
 
@@ -341,18 +342,18 @@ python robot_executor.py
 
 ## Port Reference
 - `8080` - Dashboard (dashboard.py) / Test detection (test_detection.py)
-- `11434` - Ollama API
 
 ## Dashboard Features
 
 ### Main Dashboard (`/`)
-- Live MJPEG stream with detection overlays
+- Live MJPEG stream with detection bounding boxes
 - Manual robot controls (forward, back, left, right, stop)
 - Pattern buttons (dance, circle, square, etc.)
 - Speech buttons (Hello, Yes, No, Thanks) - uses pre-recorded phrases
 - Speaker Off button (🔇) - kills speech and resets robot
 - Detection history panel
-- LLM debug panel (shows prompts and responses)
+- Navigation log (real-time target/action/reason per decision cycle)
+- Statistics (iterations, FPS, detections, commands)
 - Bluetooth status indicator
 
 ### Kids Dashboard (`/kids`)
@@ -419,32 +420,14 @@ camera = CameraCapture(
 frame, metadata = camera.get_frame_and_metadata()
 ```
 
-### LLMCommandGenerator
+### NavigationEngine (replaces LLM for movement)
 ```python
-from llm_command_generator import LLMCommandGenerator
+from navigation import NavigationEngine
 
-# Cloud LLM (default - uses GROQ_API_KEY from .env)
-llm = LLMCommandGenerator(
-    model_name='llama-3.1-8b-instant',  # Default Groq model
-    use_cloud=True,                      # Default - uses Groq
-    cloud_provider='groq',               # Default
-    frame_width=640,                     # Used for left/right positioning
-    frame_height=480                     # Used for top/bottom positioning
-)
-
-# Local LLM (Ollama) - set use_cloud=False
-llm = LLMCommandGenerator(
-    model_name='mistral',
-    use_cloud=False,
-    api_url='http://localhost:11434'
-)
-
-# Generate commands from detections
-commands = llm.generate_commands(detections, context="Find and approach people")
-
-# Access debug info (prompt, response, parsed commands)
-debug = llm.last_debug
-print(f"Mode: {debug['mode']}, Commands: {debug['parsed_commands']}")
+nav = NavigationEngine(frame_width=640, frame_height=480)
+commands = nav.generate_commands(detections, context="Find the person")
+# Returns: ['step("forward")'], ['step("left")'], ['step("stop")'], etc.
+# nav.last_debug has target, position, response for logging
 ```
 
 ### RobotCommandExecutor
