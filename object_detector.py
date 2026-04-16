@@ -176,11 +176,15 @@ class ObjectDetector:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
                 bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
 
-                if bbox_normalization:
+                # Auto-detect if boxes need normalization by checking actual values
+                # If max value > 2.0, boxes are in pixel coords and need dividing
+                # If max value <= 2.0, boxes are already normalized [0,1]
+                box_max = float(boxes.max()) if len(boxes) > 0 else 0
+                if box_max > 2.0:
                     boxes = boxes / input_h
+
                 if bbox_order == "xy":
                     boxes = boxes[:, [1, 0, 3, 2]]
 
@@ -197,7 +201,7 @@ class ObjectDetector:
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
                 y1, x1, y2, x2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
 
-                # Clamp normalized coordinates to valid range [0, 1]
+                # Clamp to [0, 1]
                 y1 = max(0.0, min(1.0, y1))
                 x1 = max(0.0, min(1.0, x1))
                 y2 = max(0.0, min(1.0, y2))
