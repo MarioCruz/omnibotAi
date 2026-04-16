@@ -1320,6 +1320,53 @@ KIDS_DASHBOARD_HTML = """
             text-shadow: none;
         }
 
+        /* Robot Brain panel */
+        .robot-brain {
+            background: #111;
+            border: 3px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 15px;
+            position: relative;
+            max-height: 250px;
+            overflow-y: auto;
+        }
+        .robot-brain::before {
+            content: 'ROBOT BRAIN';
+            position: absolute;
+            top: -8px;
+            left: 15px;
+            background: var(--dark-purple);
+            padding: 0 8px;
+            font-size: 7px;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 5px var(--neon-cyan);
+        }
+        .brain-entry {
+            padding: 5px 8px;
+            margin-bottom: 3px;
+            border-radius: 4px;
+            background: rgba(0,0,0,0.5);
+            font-size: 9px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .brain-entry .brain-icon { font-size: 16px; min-width: 20px; text-align: center; }
+        .brain-entry .brain-target { color: var(--neon-cyan); min-width: 60px; }
+        .brain-entry .brain-action {
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-weight: bold;
+            min-width: 55px;
+            text-align: center;
+        }
+        .brain-action.forward { background: var(--neon-green); color: #000; }
+        .brain-action.left { background: var(--neon-orange); color: #000; }
+        .brain-action.right { background: var(--neon-orange); color: #000; }
+        .brain-action.stop { background: #ff4444; color: #fff; }
+        .brain-entry .brain-detail { color: #888; }
+
         /* Decorative corner brackets */
         .corner-decor {
             position: fixed;
@@ -1436,10 +1483,55 @@ KIDS_DASHBOARD_HTML = """
         <div class="mission-display">
             <div class="mission-text none" id="missionText">AWAITING ORDERS...</div>
         </div>
+
+        <div class="robot-brain" id="robotBrain">
+            <div style="color: #444; text-align: center; padding: 10px; font-size: 9px;">
+                ACTIVATE ROBOT AND SELECT A MISSION
+            </div>
+        </div>
     </div>
 
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
     <script>
         let isRunning = false;
+        const socket = io();
+        const brainEl = document.getElementById('robotBrain');
+        let brainStarted = false;
+
+        socket.on('update', (data) => {
+            // Show what robot sees
+            if (data.detections && data.detections.length > 0) {
+                const det = data.detections[0];
+                const label = det.label;
+                const conf = (det.confidence * 100) | 0;
+                const icon = label === 'person' ? '👤' : label === 'cat' ? '🐱' : label === 'dog' ? '🐶' : '📦';
+
+                // Show nav decision if available
+                const nav = data.llm_debug;
+                if (nav && nav.target) {
+                    if (!brainStarted) { brainEl.innerHTML = ''; brainStarted = true; }
+                    const cmds = nav.parsed_commands || [];
+                    let actionText = 'LOOK';
+                    let actionClass = '';
+                    if (cmds.length > 0) {
+                        const cmd = cmds[0];
+                        if (cmd.includes('forward')) { actionText = 'GO!'; actionClass = 'forward'; }
+                        else if (cmd.includes('left')) { actionText = 'LEFT'; actionClass = 'left'; }
+                        else if (cmd.includes('right')) { actionText = 'RIGHT'; actionClass = 'right'; }
+                        else if (cmd.includes('stop')) { actionText = 'STOP'; actionClass = 'stop'; }
+                    }
+                    const entry = document.createElement('div');
+                    entry.className = 'brain-entry';
+                    entry.innerHTML =
+                        '<span class="brain-icon">' + icon + '</span>' +
+                        '<span class="brain-target">' + label + ' ' + conf + '%</span>' +
+                        '<span class="brain-action ' + actionClass + '">' + actionText + '</span>' +
+                        '<span class="brain-detail">' + (nav.response || '').substring(0, 40) + '</span>';
+                    brainEl.prepend(entry);
+                    while (brainEl.children.length > 20) brainEl.lastChild.remove();
+                }
+            }
+        });
 
         function togglePower() {
             const btn = document.getElementById('powerBtn');
@@ -1549,9 +1641,8 @@ KIDS_DASHBOARD_HTML = """
                 .catch(() => {});
         }
 
-        // Poll Bluetooth status every 5 seconds
         checkBluetooth();
-        setInterval(checkBluetooth, 5000);
+        setInterval(checkBluetooth, 15000);
     </script>
 </body>
 </html>
