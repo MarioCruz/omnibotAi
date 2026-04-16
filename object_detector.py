@@ -176,19 +176,6 @@ class ObjectDetector:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                # Log raw box values once to determine format
-                self._debug_count = getattr(self, '_debug_count', 0) + 1
-                if self._debug_count <= 3:
-                    top_idx = scores > self.confidence_threshold
-                    if top_idx.any():
-                        sample = boxes[top_idx][0]
-                        bbox_norm = self.intrinsics.bbox_normalization if self.intrinsics else None
-                        bbox_ord = self.intrinsics.bbox_order if self.intrinsics else None
-                        print(f"[Detector DEBUG] raw box={sample.tolist()}, input={input_w}x{input_h}, "
-                              f"norm={bbox_norm}, order={bbox_ord}")
-                        # Store for websocket access
-                        self._debug_raw = sample.tolist()
-
                 bbox_normalization = self.intrinsics.bbox_normalization if self.intrinsics else True
                 bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
 
@@ -224,19 +211,8 @@ class ObjectDetector:
                 bw = int((x2 - x1) * frame_w)
                 bh = int((y2 - y1) * frame_h)
 
-                # DEBUG: emit even if zero-sized so we can see what's happening
-                detections.append({
-                    'label': label,
-                    'confidence': float(score),
-                    'bbox': {
-                        'x': int(x1 * frame_w),
-                        'y': int(y1 * frame_h),
-                        'width': max(1, bw),
-                        'height': max(1, bh)
-                    },
-                    '_debug_raw': [float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])],
-                    '_debug_frame': [frame_w, frame_h]
-                })
+                if bw <= 0 or bh <= 0:
+                    continue
 
                 detections.append({
                     'label': label,

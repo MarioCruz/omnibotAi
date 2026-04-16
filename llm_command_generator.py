@@ -143,34 +143,48 @@ class LLMCommandGenerator:
         commands = []
         rule_log = []
 
-        # Sort by confidence, process highest first
+        # Sort by confidence, process only the BEST matching object
+        # Processing multiple objects causes contradictory directions (circling)
         sorted_objects = sorted(objects, key=lambda x: x['confidence'], reverse=True)
 
-        for obj in sorted_objects[:3]:  # Process top 3 objects
-            label = obj['label'].lower()
-            bbox = obj['bbox']
+        # Find the best object that has a rule
+        target = None
+        for obj in sorted_objects:
+            if obj['label'].lower() in self.simple_rules:
+                target = obj
+                break
 
-            # Check if object is to left, right, or center
+        # Fall back to highest confidence object if no rule match
+        if target is None and sorted_objects:
+            target = sorted_objects[0]
+
+        if target:
+            label = target['label'].lower()
+            bbox = target['bbox']
+
             frame_center_x = self.frame_width / 2
             obj_center_x = bbox['x'] + bbox['width'] / 2
 
-            if label in self.simple_rules:
-                rule_commands = self.simple_rules[label]
-                for cmd in rule_commands:
-                    if cmd in self.robot_commands:
-                        commands.append(self.robot_commands[cmd])
-                        rule_log.append(f"Rule: {label} -> {cmd}")
-
-            # Add directional adjustment based on position (threshold is 15% of frame width)
+            # Step 1: Turn toward the target if it's off-center
             threshold = self.frame_width * 0.15
             if obj_center_x < frame_center_x - threshold:
-                commands.insert(0, self.robot_commands['left'])
-                rule_log.insert(0, f"Position: {label} is LEFT of center -> turn left")
+                commands.append(self.robot_commands['left'])
+                rule_log.append(f"Position: {label} is LEFT -> turn left")
             elif obj_center_x > frame_center_x + threshold:
-                commands.insert(0, self.robot_commands['right'])
-                rule_log.insert(0, f"Position: {label} is RIGHT of center -> turn right")
+                commands.append(self.robot_commands['right'])
+                rule_log.append(f"Position: {label} is RIGHT -> turn right")
+            else:
+                # Step 2: Object is centered — move toward it
+                if label in self.simple_rules:
+                    for cmd in self.simple_rules[label]:
+                        if cmd in self.robot_commands:
+                            commands.append(self.robot_commands[cmd])
+                            rule_log.append(f"Centered: {label} -> {cmd}")
+                else:
+                    commands.append(self.robot_commands['forward'])
+                    rule_log.append(f"Centered: {label} -> forward")
 
-        result = commands[:5]  # Limit to 5 commands
+        result = commands[:3]  # Limit to 3 commands
 
         # Store debug info for rules mode
         self.last_debug = {
@@ -239,24 +253,25 @@ class LLMCommandGenerator:
         """Create prompt for LLM"""
         available = ', '.join(self.robot_commands.keys())
 
-        prompt = f"""You are a robot control AI. Generate movement commands based on what the camera sees.
+        prompt = f"""You control a robot that moves via audio tones. You see through its camera.
 
 Available commands: {available}
 
-Current view:
+Camera view:
 {object_summary}
 
 Task: {context if context else 'Explore and interact with objects'}
 
-Rules:
-- Generate 1-3 movement commands only (no speech commands)
-- Move toward interesting objects
-- Turn left/right to center objects in view
-- Avoid obstacles by turning
-- If nothing interesting, search or patrol
+IMPORTANT rules:
+- Pick ONE action per response. Either turn OR move forward. Never both.
+- If the target object is to the LEFT or RIGHT of center, output ONLY "left" or "right" to face it.
+- If the target object is at CENTER, output ONLY "forward" to approach it.
+- If the target is "very close", output "stop".
+- Do NOT output patterns like dance/circle/search — only simple movement.
+- Ignore objects that are not relevant to the task.
 
 Respond with ONLY a JSON object:
-{{"commands": ["cmd1", "cmd2"]}}"""
+{{"commands": ["forward"]}}"""
 
         return prompt
 

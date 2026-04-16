@@ -50,7 +50,7 @@ class RobotCommandExecutor:
 
         # Movement durations (ms)
         self.step_duration = 500
-        self.turn_duration = 3000
+        self.turn_duration = 750  # Short turn for course correction (was 3000 = 90°)
 
         # Pattern definitions
         self.patterns = {

@@ -211,25 +211,31 @@ def process_loop():
             # Generate and execute commands ONLY if a mission/task has been set AND we have detections
             commands = []
             if system_state['task'] and llm and detections:
-                # Generate commands based on task
-                if system_state['use_llm']:
-                    commands = llm.generate_commands(
-                        detections,
-                        context=system_state['task'],
-                        use_llm=True
-                    )
-                else:
-                    commands = llm.generate_commands(detections, use_llm=False)
+                # Skip if robot is still executing previous commands
+                if not getattr(process_loop, '_executing', False):
+                    # Generate commands based on task
+                    if system_state['use_llm']:
+                        commands = llm.generate_commands(
+                            detections,
+                            context=system_state['task'],
+                            use_llm=True
+                        )
+                    else:
+                        commands = llm.generate_commands(detections, use_llm=False)
 
-                # Execute commands in background to avoid blocking detection pipeline
-                if commands and robot and robot.connected:
-                    cmds_to_run = commands[:3]
-                    def _run_commands(cmds):
-                        for cmd in cmds:
-                            if not system_state['running']:
-                                break
-                            robot.execute(cmd)
-                    threading.Thread(target=_run_commands, args=(cmds_to_run,), daemon=True).start()
+                    # Execute commands in background to avoid blocking detection pipeline
+                    if commands and robot and robot.connected:
+                        cmds_to_run = commands[:3]
+                        process_loop._executing = True
+                        def _run_commands(cmds):
+                            try:
+                                for cmd in cmds:
+                                    if not system_state['running']:
+                                        break
+                                    robot.execute(cmd)
+                            finally:
+                                process_loop._executing = False
+                        threading.Thread(target=_run_commands, args=(cmds_to_run,), daemon=True).start()
 
             # Update stats
             system_state['last_commands'] = commands[:20]
