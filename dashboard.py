@@ -43,7 +43,7 @@ load_env()
 # Import our modules
 from camera_capture import CameraCapture
 from object_detector import ObjectDetector
-from llm_command_generator import LLMCommandGenerator
+from navigation import NavigationEngine
 from robot_executor import RobotCommandExecutor
 from eye_display import EyeDisplay
 
@@ -68,7 +68,6 @@ system_state = {
     'paused': False,
     'shutdown': False,  # Flag for graceful shutdown
     'task': None,  # No task by default - must select a mission to enable autonomous mode
-    'use_llm': True,
     'detections': [],
     'last_commands': [],
     'stats': {
@@ -82,7 +81,7 @@ system_state = {
 # Components
 camera = None
 detector = None
-llm = None
+nav = None
 robot = None
 eye_display = None
 frame_lock = threading.Lock()
@@ -98,7 +97,7 @@ mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
 
 
-def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', volume=0.5,
+def init_system(detector_backend='imx500', volume=0.5,
                 eye_display_type='st7735', eye_dc_pin=24, eye_rst_pin=25, eye_cs_pin=0, eye_spi_port=0,
                 eye_brightness=15, eye_rotation=0, eye_offset_x=0, eye_offset_y=0):
     """Initialize all system components"""
@@ -125,10 +124,10 @@ def init_system(detector_backend='imx500', llm_model='llama-3.1-8b-instant', vol
     if detector and detector_backend == 'imx500' and hasattr(camera, 'picam2'):
         detector.set_picam2(camera.picam2)
 
-    # LLM - pass camera resolution for accurate object positioning
-    print(f"[Dashboard] Initializing LLM ({llm_model})...")
-    llm = LLMCommandGenerator(
-        model_name=llm_model,
+    # Navigation engine - rule-based, no LLM needed
+    global nav
+    print("[Dashboard] Initializing navigation engine...")
+    nav = NavigationEngine(
         frame_width=camera_resolution[0],
         frame_height=camera_resolution[1]
     )
@@ -220,7 +219,7 @@ def process_loop():
 
             # Generate and execute commands ONLY if a mission/task has been set AND we have detections
             commands = []
-            if system_state['task'] and llm and detections:
+            if system_state['task'] and nav and detections:
                 # Log detections for this cycle
                 det_summary = ', '.join(
                     f"{d['label']}({d['confidence']:.0%} x:{d['bbox']['x']} y:{d['bbox']['y']} w:{d['bbox']['width']} h:{d['bbox']['height']})"
@@ -232,15 +231,12 @@ def process_loop():
                 if getattr(process_loop, '_executing', False):
                     task_logger.debug("SKIP busy executing previous commands")
                 else:
-                    # Rule-based navigation: instant, uses actual bbox positions
-                    # LLM (both 8B and 70B) always returns "right" and adds 15s latency
-                    commands = llm.generate_commands(detections, use_llm=False)
+                    commands = nav.generate_commands(detections, context=system_state['task'])
 
-                    # Log command generation details
-                    debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
+                    debug = nav.last_debug
                     task_logger.info(
-                        f"CMD mode={debug.get('mode','?')} commands={commands} "
-                        f"response={debug.get('response','')[:150]}"
+                        f"NAV target={debug.get('target','')} pos={debug.get('position','')} "
+                        f"commands={commands} | {debug.get('response','')}"
                     )
 
                     # Execute commands in background to avoid blocking detection pipeline
@@ -265,13 +261,13 @@ def process_loop():
             system_state['stats']['iterations'] += 1
             system_state['stats']['fps'] = camera.get_fps()
 
-            # Emit update via WebSocket (include LLM debug info)
-            llm_debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
+            # Emit update via WebSocket
+            nav_debug = nav.last_debug if nav and hasattr(nav, 'last_debug') else {}
             socketio.emit('update', {
                 'detections': detections,
                 'commands': commands,
                 'stats': system_state['stats'],
-                'llm_debug': llm_debug
+                'llm_debug': nav_debug  # Keep key name for dashboard JS compatibility
             })
 
             # Eye display idle behavior - go sleepy after inactivity
@@ -1774,7 +1770,6 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='AI Robot Dashboard')
     parser.add_argument('--detector', default='imx500', choices=['imx500', 'yolov5', 'mediapipe'])
-    parser.add_argument('--llm-model', default='llama-3.1-8b-instant', help='LLM model (Groq default: llama-3.1-8b-instant, Ollama: mistral)')
     parser.add_argument('--port', type=int, default=8080, help='Dashboard port')
     parser.add_argument('--no-ssl', action='store_true', help='Disable HTTPS')
     parser.add_argument('--volume', type=float, default=robot_config.get('volume', 0.5),
@@ -1787,7 +1782,6 @@ if __name__ == '__main__':
     # Initialize system with config.json defaults merged with CLI overrides
     init_system(
         detector_backend=args.detector,
-        llm_model=args.llm_model,
         volume=args.volume,
         eye_display_type=args.eye_display,
         eye_dc_pin=robot_config.get('eye_dc_pin', 24),
