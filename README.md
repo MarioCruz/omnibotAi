@@ -268,18 +268,22 @@ eye.blink()
 
 ### Main Dashboard (`/`)
 - **Live Camera Stream**: MJPEG with detection bounding boxes
-- **Navigation Log**: Real-time decisions — target, action (FORWARD/LEFT/RIGHT/STOP), reason
-- **Detection History**: Log of detected objects with timestamps
+- **Navigation Log**: Real-time decisions with color-coded actions
+- **Detection History**: Rolling log of detected objects
+- **Set Task / End Task**: Start and stop navigation missions
+- **Describe Button**: LLM describes the scene and robot speaks it
 - **Manual Robot Controls**: Movement buttons, patterns, speech
 - **Speech Buttons**: Hello, Yes, No, Thanks (pre-recorded phrases)
-- **Speaker Off Button**: Kills speech and resets robot speaker
 - **Statistics**: Iterations, FPS, detection count, command count
 - **Bluetooth Status**: Connection indicator
 
 ### Kids Dashboard (`/kids`)
-- **Simplified Interface**: Large, colorful buttons for children
-- **Mission Buttons**: Find Shoes, Find Person, Explore, Dance
-- **Big Direction Controls**: Emoji arrows (⬆️ ⬇️ ⬅️ ➡️)
+- **Simplified Interface**: Large, colorful arcade buttons
+- **Mission Buttons**: Find Human, Find Ball, Explore, Dance
+- **What Do You See?**: Robot describes what it sees (LLM + speech)
+- **End Mission**: Stop navigation without powering down
+- **Big Direction Controls**: D-pad with emoji arrows
+- **Robot Brain Panel**: Real-time view of what the robot is thinking
 - **Say Hello**: Plays "Hello, I am Omnibot" greeting
 - **Quiet Button**: 🔇 Speaker off for kids
 
@@ -290,12 +294,12 @@ eye.blink()
 | `/` | GET | Main dashboard UI |
 | `/kids` | GET | Kid-friendly dashboard |
 | `/stream` | GET | MJPEG video stream |
-| `/api/detections` | GET | Current detections JSON |
-| `/api/history` | GET | Detection history |
 | `/api/start` | POST | Start AI system |
 | `/api/stop` | POST | Stop AI system |
 | `/api/command` | POST | Send robot command |
 | `/api/task` | POST | Set navigation task (e.g., "Find the person") |
+| `/api/task/end` | POST | End task without stopping system |
+| `/api/describe` | POST | LLM describes the scene and robot speaks it |
 | `/api/bluetooth` | GET | Bluetooth connection status |
 
 ### Robot Commands via `/api/command`
@@ -369,6 +373,18 @@ NAV target=person (73%) pos=x:197 cx:345 frame_cx:320 | person CENTERED -> forwa
 NAV target=person (78%) pos=x:0 cx:140 frame_cx:320   | person LEFT -> turn left
 NAV target=person (73%) pos=x:140 cx:346 frame_cx:320 | person fills 64% -> STOP
 ```
+
+## Describe Scene (LLM)
+
+The "Describe" button uses Groq's Llama 3.3 70B to describe what the robot sees in natural language, then speaks it through the robot's speaker. This is the one place the LLM shines, since latency is acceptable for a one-shot description and you actually need language understanding.
+
+```
+Press "Describe" -> "I see a person and a keyboard."
+```
+
+Requires `GROQ_API_KEY` in `.env`. Without it, falls back to a simple list: "I can see 3 things: person, keyboard, laptop."
+
+The response is kept short (under 10 words) and sanitized for the text-to-speech engine. The LLM is not used for navigation (see Why Rules Instead of LLM above).
 
 ## Troubleshooting
 
