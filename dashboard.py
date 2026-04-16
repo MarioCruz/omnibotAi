@@ -534,41 +534,29 @@ DASHBOARD_HTML = """
         .log-entry.success { color: #00ff88; }
         .log-entry.error { color: #ff4444; }
 
-        .llm-debug {
-            background: rgba(0,0,0,0.3);
-            border-radius: 6px;
-            padding: 10px;
-            font-family: monospace;
-            font-size: 11px;
-            white-space: pre-wrap;
-            word-break: break-word;
+        .nav-log {
             max-height: 300px;
             overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
         }
-        .llm-debug .section {
-            margin-bottom: 12px;
-        }
-        .llm-debug .section-title {
-            color: #ff922b;
-            font-weight: bold;
+        .nav-entry {
+            padding: 6px 10px;
             margin-bottom: 4px;
-            display: flex;
-            justify-content: space-between;
-        }
-        .llm-debug .section-content {
-            color: #aaa;
-            padding-left: 8px;
-            border-left: 2px solid rgba(255,146,43,0.3);
-        }
-        .llm-debug .mode-badge {
-            display: inline-block;
-            padding: 2px 8px;
             border-radius: 4px;
-            font-size: 10px;
-            font-weight: bold;
+            background: rgba(0,0,0,0.3);
+            display: flex;
+            gap: 10px;
+            align-items: center;
         }
-        .llm-debug .mode-llm { background: #00d4ff; color: #000; }
-        .llm-debug .mode-rules { background: #ff922b; color: #000; }
+        .nav-entry .nav-time { color: #666; font-size: 11px; min-width: 70px; }
+        .nav-entry .nav-target { color: #00d4ff; font-weight: 600; min-width: 80px; }
+        .nav-entry .nav-action { font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .nav-action.forward { background: #00ff88; color: #000; }
+        .nav-action.left { background: #ff922b; color: #000; }
+        .nav-action.right { background: #ff922b; color: #000; }
+        .nav-action.stop { background: #ff4444; color: #fff; }
+        .nav-entry .nav-reason { color: #aaa; font-size: 11px; }
 
         @media (max-width: 900px) {
             .container { grid-template-columns: 1fr; }
@@ -665,9 +653,9 @@ DASHBOARD_HTML = """
             </div>
 
             <div class="panel" style="margin-top: 20px;">
-                <h2>Generated Commands</h2>
-                <div class="commands" id="commandsList">
-                    <div style="color: #666; text-align: center; padding: 20px;">No commands yet</div>
+                <h2>Navigation Log</h2>
+                <div class="nav-log" id="navLog">
+                    <div style="color: #666; text-align: center; padding: 20px;">Set a task to start navigation</div>
                 </div>
             </div>
 
@@ -678,40 +666,14 @@ DASHBOARD_HTML = """
         </div>
     </div>
 
-    <!-- LLM Debug Panel - Full Width -->
-    <div style="max-width: 1400px; margin: 20px auto; padding: 0 20px;">
-        <div class="panel">
-            <h2>LLM Debug <span id="llmModeBadge" class="mode-badge" style="margin-left: 10px;"></span></h2>
-            <div class="llm-debug" id="llmDebug">
-                <div style="color: #666; text-align: center; padding: 20px;">Waiting for LLM activity...</div>
-            </div>
-        </div>
-    </div>
-
     <script>
         const socket = io();
-        let detectionHistory = [];
-        const MAX_DETECTION_HISTORY = 50;
-
-        function logDetection(detections) {
-            if (detections.length === 0) return;
-
-            const timestamp = new Date().toLocaleTimeString();
-            const summary = detections.map(d => `${d.label} (${(d.confidence * 100).toFixed(0)}%)`).join(', ');
-
-            detectionHistory.unshift({ timestamp, summary, count: detections.length });
-            if (detectionHistory.length > MAX_DETECTION_HISTORY) {
-                detectionHistory.pop();
-            }
-
-            const detList = document.getElementById('detectionsList');
-            detList.innerHTML = detectionHistory.map(h => `
-                <div class="log-entry info">
-                    <span style="color: #888;">[${h.timestamp}]</span>
-                    <span style="color: #00ff88;">${h.count}x</span> ${h.summary}
-                </div>
-            `).join('');
-        }
+        const MAX_HISTORY = 20;
+        const MAX_NAV_LOG = 30;
+        const detectionsList = document.getElementById('detectionsList');
+        const navLogEl = document.getElementById('navLog');
+        const activityLog = document.getElementById('activityLog');
+        let navLogStarted = false;
 
         socket.on('connect', () => {
             log('Connected to server', 'success');
@@ -724,60 +686,53 @@ DASHBOARD_HTML = """
         });
 
         socket.on('update', (data) => {
-            // Update stats
+            // Update stat numbers directly (no innerHTML rebuild)
             document.getElementById('statIterations').textContent = data.stats.iterations;
             document.getElementById('statFps').textContent = data.stats.fps;
             document.getElementById('statDetections').textContent = data.stats.total_detections;
             document.getElementById('statCommands').textContent = data.stats.total_commands;
 
-            // Log detections to history
-            logDetection(data.detections);
-
-            // Update commands
-            const cmdList = document.getElementById('commandsList');
-            if (data.commands.length > 0) {
-                cmdList.innerHTML = data.commands.map(c => `
-                    <div class="command-item">${c}</div>
-                `).join('');
-                log(`Executed: ${data.commands.join(', ')}`, 'info');
+            // Detection history — only add new entry if there are detections
+            if (data.detections.length > 0) {
+                const time = new Date().toLocaleTimeString();
+                const summary = data.detections.map(d =>
+                    d.label + ' (' + (d.confidence * 100 | 0) + '%)'
+                ).join(', ');
+                const entry = document.createElement('div');
+                entry.className = 'log-entry info';
+                entry.innerHTML = '<span style="color:#888">[' + time + ']</span> <span style="color:#00ff88">' + data.detections.length + 'x</span> ' + summary;
+                detectionsList.prepend(entry);
+                while (detectionsList.children.length > MAX_HISTORY) detectionsList.lastChild.remove();
             }
 
-            // Update LLM debug panel
-            if (data.llm_debug && data.llm_debug.prompt) {
-                const llmDebug = document.getElementById('llmDebug');
-                const modeBadge = document.getElementById('llmModeBadge');
-
-                // Update mode badge
-                const mode = data.llm_debug.mode || 'none';
-                modeBadge.textContent = mode.toUpperCase();
-                modeBadge.className = 'mode-badge mode-' + mode;
-
-                // Escape HTML to prevent XSS
-                const escapeHtml = (str) => {
-                    const div = document.createElement('div');
-                    div.textContent = str;
-                    return div.innerHTML;
-                };
-
-                llmDebug.innerHTML = `
-                    <div class="section">
-                        <div class="section-title">
-                            <span>PROMPT</span>
-                            <span style="color: #666;">${data.llm_debug.timestamp || ''}</span>
-                        </div>
-                        <div class="section-content">${escapeHtml(data.llm_debug.prompt || '')}</div>
-                    </div>
-                    <div class="section">
-                        <div class="section-title">RESPONSE</div>
-                        <div class="section-content">${escapeHtml(data.llm_debug.response || '')}</div>
-                    </div>
-                    <div class="section">
-                        <div class="section-title">PARSED COMMANDS</div>
-                        <div class="section-content" style="color: #00ff88;">${
-                            (data.llm_debug.parsed_commands || []).join('\\n') || 'None'
-                        }</div>
-                    </div>
-                `;
+            // Navigation log — show real-time decisions
+            const nav = data.llm_debug;
+            if (nav && nav.target) {
+                if (!navLogStarted) {
+                    navLogEl.innerHTML = '';
+                    navLogStarted = true;
+                }
+                const time = nav.timestamp || new Date().toLocaleTimeString();
+                // Figure out action type for color coding
+                const cmds = nav.parsed_commands || [];
+                let actionText = 'idle';
+                let actionClass = '';
+                if (cmds.length > 0) {
+                    const cmd = cmds[0];
+                    if (cmd.includes('forward')) { actionText = 'FORWARD'; actionClass = 'forward'; }
+                    else if (cmd.includes('left')) { actionText = 'LEFT'; actionClass = 'left'; }
+                    else if (cmd.includes('right')) { actionText = 'RIGHT'; actionClass = 'right'; }
+                    else if (cmd.includes('stop')) { actionText = 'STOP'; actionClass = 'stop'; }
+                }
+                const entry = document.createElement('div');
+                entry.className = 'nav-entry';
+                entry.innerHTML =
+                    '<span class="nav-time">' + time + '</span>' +
+                    '<span class="nav-target">' + (nav.target || '') + '</span>' +
+                    '<span class="nav-action ' + actionClass + '">' + actionText + '</span>' +
+                    '<span class="nav-reason">' + (nav.response || '') + '</span>';
+                navLogEl.prepend(entry);
+                while (navLogEl.children.length > MAX_NAV_LOG) navLogEl.lastChild.remove();
             }
         });
 
@@ -787,40 +742,35 @@ DASHBOARD_HTML = """
             el.className = 'status ' + (running ? 'running' : 'stopped');
         }
 
-        function log(message, type = '') {
-            const logEl = document.getElementById('activityLog');
+        function log(msg, type) {
             const time = new Date().toLocaleTimeString();
-            logEl.innerHTML = `<div class="log-entry ${type}">[${time}] ${message}</div>` + logEl.innerHTML;
-            if (logEl.children.length > 50) {
-                logEl.removeChild(logEl.lastChild);
-            }
+            const entry = document.createElement('div');
+            entry.className = 'log-entry ' + (type || '');
+            entry.textContent = '[' + time + '] ' + msg;
+            activityLog.prepend(entry);
+            while (activityLog.children.length > 30) activityLog.lastChild.remove();
         }
 
         function startSystem() {
-            fetch('/api/start', { method: 'POST' })
-                .then(r => r.json())
-                .then(d => {
-                    log('System started', 'success');
-                    updateStatus('Running', true);
-                });
+            fetch('/api/start', { method: 'POST' }).then(() => {
+                log('System started', 'success');
+                updateStatus('Running', true);
+            });
         }
 
         function stopSystem() {
-            fetch('/api/stop', { method: 'POST' })
-                .then(r => r.json())
-                .then(d => {
-                    log('System stopped', 'error');
-                    updateStatus('Stopped', false);
-                });
+            fetch('/api/stop', { method: 'POST' }).then(() => {
+                log('System stopped', 'error');
+                updateStatus('Stopped', false);
+                navLogStarted = false;
+            });
         }
 
         function pauseSystem() {
-            fetch('/api/pause', { method: 'POST' })
-                .then(r => r.json())
-                .then(d => {
-                    log('System paused', 'info');
-                    updateStatus('Paused', false);
-                });
+            fetch('/api/pause', { method: 'POST' }).then(() => {
+                log('System paused', 'info');
+                updateStatus('Paused', false);
+            });
         }
 
         function setTask() {
@@ -829,8 +779,7 @@ DASHBOARD_HTML = """
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ task: task })
-            }).then(r => r.json())
-              .then(d => log(`Task set: ${task}`, 'info'));
+            }).then(() => log('Task set: ' + task, 'info'));
         }
 
         function sendCommand(cmd) {
@@ -838,42 +787,28 @@ DASHBOARD_HTML = """
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ command: cmd })
-            }).then(r => r.json())
-              .then(d => log(`Audio: ${cmd}`, 'info'));
+            }).then(() => log('Command: ' + cmd, 'info'));
         }
 
         function speakText() {
             const text = document.getElementById('speechInput').value;
-            if (text) {
-                speakPhrase(text);
-            }
-        }
-
-        function speakPhrase(text) {
-            sendCommand('speakText("' + text + '")');
+            if (text) sendCommand('speakText("' + text.replace(/"/g, '') + '")');
         }
 
         function playPhrase(name) {
             sendCommand('phrase("' + name + '")');
         }
 
+        // Bluetooth check — every 15s is plenty
         function checkBt() {
-            fetch('/api/bluetooth')
-                .then(r => r.json())
-                .then(data => {
-                    const el = document.getElementById('statBt');
-                    if (data.connected) {
-                        el.textContent = data.devices[0] || 'ON';
-                        el.style.color = '#4488ff';
-                    } else {
-                        el.textContent = 'OFF';
-                        el.style.color = '#ff4444';
-                    }
-                })
-                .catch(() => {});
+            fetch('/api/bluetooth').then(r => r.json()).then(data => {
+                const el = document.getElementById('statBt');
+                el.textContent = data.connected ? (data.devices[0] || 'ON') : 'OFF';
+                el.style.color = data.connected ? '#4488ff' : '#ff4444';
+            }).catch(() => {});
         }
         checkBt();
-        setInterval(checkBt, 5000);
+        setInterval(checkBt, 15000);
     </script>
 </body>
 </html>
