@@ -176,20 +176,18 @@ class ObjectDetector:
                 # Standard SSD/YOLO output format
                 boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-                bbox_order = self.intrinsics.bbox_order if self.intrinsics else "yx"
-
                 # Auto-detect if boxes need normalization by checking actual values
-                # If max value > 2.0, boxes are in pixel coords and need dividing
-                # If max value <= 2.0, boxes are already normalized [0,1]
                 box_max = float(boxes.max()) if len(boxes) > 0 else 0
                 if box_max > 2.0:
                     boxes = boxes / input_h
 
-                if bbox_order == "xy":
-                    boxes = boxes[:, [1, 0, 3, 2]]
-
-            # Convert detections
+            # Map model coordinates to frame coordinates
+            # Model input is square (e.g. 640x640), frame may not be (e.g. 640x480)
+            # The ISP letterboxes: pads top/bottom to make the frame square
             frame_h, frame_w = frame.shape[:2]
+            pad_y = (input_h - frame_h * input_w / frame_w) / 2.0 if frame_w > 0 else 0
+            scale = input_w / frame_w  # horizontal scale (no padding on x)
+
             for i, (score, category) in enumerate(zip(scores, classes)):
                 if score < self.confidence_threshold:
                     continue
@@ -199,21 +197,31 @@ class ObjectDetector:
 
                 box = boxes[i]
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
-                y1, x1, y2, x2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
 
-                # Clamp to [0, 1]
-                y1 = max(0.0, min(1.0, y1))
-                x1 = max(0.0, min(1.0, x1))
-                y2 = max(0.0, min(1.0, y2))
-                x2 = max(0.0, min(1.0, x2))
+                # YOLOv8 _pp output: [x1, y1, x2, y2] normalized to [0,1]
+                # (bbox_order "xy" means data IS in xy order — no swap needed)
+                nx1, ny1, nx2, ny2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
+
+                # Convert from model space (square) to frame space (may be non-square)
+                # x maps directly, y needs padding offset removed
+                x1 = nx1 * input_w / scale
+                x2 = nx2 * input_w / scale
+                y1 = (ny1 * input_h - pad_y) / scale
+                y2 = (ny2 * input_h - pad_y) / scale
+
+                # Clamp to frame bounds
+                x1 = max(0, min(frame_w, x1))
+                x2 = max(0, min(frame_w, x2))
+                y1 = max(0, min(frame_h, y1))
+                y2 = max(0, min(frame_h, y2))
 
                 if x1 > x2:
                     x1, x2 = x2, x1
                 if y1 > y2:
                     y1, y2 = y2, y1
 
-                bw = int((x2 - x1) * frame_w)
-                bh = int((y2 - y1) * frame_h)
+                bw = int(x2 - x1)
+                bh = int(y2 - y1)
 
                 if bw <= 0 or bh <= 0:
                     continue
@@ -222,8 +230,8 @@ class ObjectDetector:
                     'label': label,
                     'confidence': float(score),
                     'bbox': {
-                        'x': int(x1 * frame_w),
-                        'y': int(y1 * frame_h),
+                        'x': int(x1),
+                        'y': int(y1),
                         'width': bw,
                         'height': bh
                     }
