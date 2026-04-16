@@ -232,9 +232,12 @@ def process_loop():
                 if getattr(process_loop, '_executing', False):
                     task_logger.debug("SKIP busy executing previous commands")
                 else:
-                    # Use rule-based navigation (reliable position math)
-                    # LLM was always returning "right" regardless of actual position
-                    commands = llm.generate_commands(detections, use_llm=False)
+                    # Use LLM with rule-based fallback (llm_command_generator handles fallback)
+                    commands = llm.generate_commands(
+                        detections,
+                        context=system_state['task'],
+                        use_llm=True
+                    )
 
                     # Log command generation details
                     debug = llm.last_debug if llm and hasattr(llm, 'last_debug') else {}
