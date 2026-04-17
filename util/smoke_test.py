@@ -93,26 +93,33 @@ def check_camera():
 
 
 def check_audio():
-    """sox + pw-play must be available and produce a short muted tone."""
+    """sox + pw-play must be available and successfully connect to PipeWire."""
     import subprocess
     for tool in ('sox', 'pw-play'):
         r = subprocess.run(['which', tool], capture_output=True, text=True)
         if r.returncode != 0:
             raise RuntimeError(f"{tool} not on PATH")
     # 0.1s tone at 1000 Hz, silenced with gain -60 so nothing audible.
+    # Capture stderr so we can report a PipeWire connection failure rather
+    # than letting pw-play exit non-zero silently.
     p = subprocess.Popen(
         ['sox', '-n', '-t', 'wav', '-', 'synth', '0.1', 'sine', '1000', 'gain', '-60'],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
     )
     q = subprocess.Popen(
-        ['pw-play', '-'], stdin=p.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        ['pw-play', '-'], stdin=p.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
     )
     p.stdout.close()
     try:
-        q.wait(timeout=5)
+        _, err = q.communicate(timeout=5)
     except subprocess.TimeoutExpired:
         q.kill()
         raise RuntimeError("pw-play hung (Bluetooth speaker offline?)")
+    if q.returncode != 0:
+        msg = (err or b'').decode(errors='replace').strip() or 'unknown error'
+        # Common case: systemd service missing XDG_RUNTIME_DIR so pw-play
+        # can't find the PipeWire socket.
+        raise RuntimeError(f"pw-play exit {q.returncode}: {msg}")
 
 
 def check_eye_display():

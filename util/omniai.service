@@ -23,6 +23,10 @@ StandardError=journal
 SyslogIdentifier=omniai
 
 Environment=PYTHONUNBUFFERED=1
+# PipeWire runs as the admin user's service; we need XDG_RUNTIME_DIR so
+# pw-play can find its socket at /run/user/1000/pipewire-0. Requires
+# `loginctl enable-linger admin` so the runtime dir survives without login.
+Environment=XDG_RUNTIME_DIR=/run/user/1000
 
 # Supplementary groups needed for camera, audio, bluetooth, gpio/spi
 SupplementaryGroups=video audio bluetooth gpio spi i2c
