@@ -839,6 +839,18 @@ DASHBOARD_HTML = """
         const MAX_HISTORY = 20;
         const MAX_NAV_LOG = 30;
         const detectionsList = document.getElementById('detectionsList');
+
+        // Escape dynamic data before inserting via innerHTML. Labels come from
+        // the detector and are normally safe, but a custom model or bad actor
+        // could inject markup — cheap to be defensive.
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
         const navLogEl = document.getElementById('navLog');
         const activityLog = document.getElementById('activityLog');
         let navLogStarted = false;
@@ -864,11 +876,11 @@ DASHBOARD_HTML = """
             if (data.detections.length > 0) {
                 const time = new Date().toLocaleTimeString();
                 const summary = data.detections.map(d =>
-                    d.label + ' (' + (d.confidence * 100 | 0) + '%)'
+                    escHtml(d.label) + ' (' + (d.confidence * 100 | 0) + '%)'
                 ).join(', ');
                 const entry = document.createElement('div');
                 entry.className = 'log-entry info';
-                entry.innerHTML = '<span style="color:#888">[' + time + ']</span> <span style="color:#00ff88">' + data.detections.length + 'x</span> ' + summary;
+                entry.innerHTML = '<span style="color:#888">[' + escHtml(time) + ']</span> <span style="color:#00ff88">' + data.detections.length + 'x</span> ' + summary;
                 detectionsList.prepend(entry);
                 while (detectionsList.children.length > MAX_HISTORY) detectionsList.lastChild.remove();
             }
@@ -895,10 +907,10 @@ DASHBOARD_HTML = """
                 const entry = document.createElement('div');
                 entry.className = 'nav-entry';
                 entry.innerHTML =
-                    '<span class="nav-time">' + time + '</span>' +
-                    '<span class="nav-target">' + (nav.target || '') + '</span>' +
-                    '<span class="nav-action ' + actionClass + '">' + actionText + '</span>' +
-                    '<span class="nav-reason">' + (nav.response || '') + '</span>';
+                    '<span class="nav-time">' + escHtml(time) + '</span>' +
+                    '<span class="nav-target">' + escHtml(nav.target || '') + '</span>' +
+                    '<span class="nav-action ' + escHtml(actionClass) + '">' + escHtml(actionText) + '</span>' +
+                    '<span class="nav-reason">' + escHtml(nav.response || '') + '</span>';
                 navLogEl.prepend(entry);
                 while (navLogEl.children.length > MAX_NAV_LOG) navLogEl.lastChild.remove();
             }
@@ -1712,6 +1724,15 @@ KIDS_DASHBOARD_HTML = """
         const brainEl = document.getElementById('robotBrain');
         let brainStarted = false;
 
+        function escHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         socket.on('update', (data) => {
             // Show what robot sees
             if (data.detections && data.detections.length > 0) {
@@ -1738,9 +1759,9 @@ KIDS_DASHBOARD_HTML = """
                     entry.className = 'brain-entry';
                     entry.innerHTML =
                         '<span class="brain-icon">' + icon + '</span>' +
-                        '<span class="brain-target">' + label + ' ' + conf + '%</span>' +
-                        '<span class="brain-action ' + actionClass + '">' + actionText + '</span>' +
-                        '<span class="brain-detail">' + (nav.response || '').substring(0, 40) + '</span>';
+                        '<span class="brain-target">' + escHtml(label) + ' ' + conf + '%</span>' +
+                        '<span class="brain-action ' + escHtml(actionClass) + '">' + escHtml(actionText) + '</span>' +
+                        '<span class="brain-detail">' + escHtml((nav.response || '').substring(0, 40)) + '</span>';
                     brainEl.prepend(entry);
                     while (brainEl.children.length > 20) brainEl.lastChild.remove();
                 }
@@ -2091,7 +2112,17 @@ def api_command():
 
 @app.route('/api/status', methods=['GET'])
 def api_status():
-    return jsonify(system_state)
+    # Whitelist fields so future additions to system_state don't leak by
+    # accident. Keep the response compact — dashboard JS just needs these.
+    return jsonify({
+        'running': bool(system_state.get('running')),
+        'paused': bool(system_state.get('paused')),
+        'task': system_state.get('task'),
+        'detections': system_state.get('detections', [])[:20],
+        'last_commands': system_state.get('last_commands', [])[:20],
+        'stats': system_state.get('stats', {}),
+        'init_errors': list(system_state.get('init_errors', [])),
+    })
 
 
 def _poll_bluetooth_once():
