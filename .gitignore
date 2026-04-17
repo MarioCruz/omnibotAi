@@ -56,6 +56,9 @@ models/
 # Blog drafts (personal use only)
 blog-draft*
 
+# Personal deploy scripts (user-specific host/paths, not for repo)
+deploy-my-*.sh
+
 # Claude config files (except root)
 **/claude.md
 **/CLAUDE.md
