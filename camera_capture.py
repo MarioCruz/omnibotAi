@@ -75,6 +75,7 @@ class CameraCapture:
         self.frame_count = 0
         self.fps = 0
         self.last_fps_time = time.time()
+        self.last_capture_ts = 0.0  # Wall-clock of most recent successful capture
 
         # Start capture thread
         self.capture_thread = threading.Thread(target=self._capture_loop)
@@ -103,6 +104,7 @@ class CameraCapture:
                 with self.frame_lock:
                     self.current_frame = frame.copy()
                     self.current_metadata = metadata
+                    self.last_capture_ts = time.time()
 
                 frames_this_second += 1
 
@@ -150,6 +152,13 @@ class CameraCapture:
     def get_fps(self):
         """Get current frames per second"""
         return self.fps
+
+    def frame_age(self):
+        """Seconds since last successful capture, or None if never captured."""
+        with self.frame_lock:
+            if not self.last_capture_ts:
+                return None
+            return time.time() - self.last_capture_ts
 
     def stop(self):
         """Stop the camera capture and release resources"""

@@ -229,29 +229,41 @@ class AudioCommander:
             self.is_playing = False
             return False
 
+    def _ensure_command_mode(self):
+        """Send speaker_off to ensure robot interprets tones as movement commands."""
+        if not getattr(self, '_in_command_mode', False):
+            self._play_tone(self.FREQUENCIES['speaker_off'], 200)
+            self._in_command_mode = True
+
     def forward(self, duration_ms: int = 500):
         """Move forward."""
+        self._ensure_command_mode()
         self._play_tone(self.FREQUENCIES['forward'], duration_ms)
 
     def backward(self, duration_ms: int = 500):
         """Move backward."""
+        self._ensure_command_mode()
         self._play_tone(self.FREQUENCIES['backward'], duration_ms)
 
     def left(self, duration_ms: int = 500):
         """Turn left."""
+        self._ensure_command_mode()
         self._play_tone(self.FREQUENCIES['left'], duration_ms)
 
     def right(self, duration_ms: int = 500):
         """Turn right."""
+        self._ensure_command_mode()
         self._play_tone(self.FREQUENCIES['right'], duration_ms)
 
     def speaker_on(self, duration_ms: int = 200):
-        """Turn speaker on."""
+        """Turn speaker on (audio/speech mode)."""
         self._play_tone(self.FREQUENCIES['speaker_on'], duration_ms)
+        self._in_command_mode = False
 
     def speaker_off(self, duration_ms: int = 200):
-        """Turn speaker off."""
+        """Turn speaker off (command/movement mode)."""
         self._play_tone(self.FREQUENCIES['speaker_off'], duration_ms)
+        self._in_command_mode = True
 
     def stop(self):
         """Stop any playing audio."""
@@ -299,11 +311,16 @@ class AudioCommander:
 
         # Send speaker_off tone, THEN reset stopping flag
         # (keeps _stopping=True until tone is sent so speak() can't start mid-tone)
+        sox_proc = None
+        pw_proc = None
         try:
             sox_cmd = ['sox', '-n', '-t', 'wav', '-', 'synth', '0.5', 'sine', str(self.FREQUENCIES['speaker_off'])]
             pw_cmd = ['pw-play', '-']
             sox_proc = subprocess.Popen(sox_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             pw_proc = subprocess.Popen(pw_cmd, stdin=sox_proc.stdout, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Close parent's copy of sox stdout so SIGPIPE propagates if pw-play exits
+            sox_proc.stdout.close()
+            # 3s timeout: 0.5s tone + 2.5s slack for Bluetooth latency
             pw_proc.wait(timeout=3)
             print("[AudioCommander] Speech stopped, speaker off sent via sox")
         except Exception as e:
@@ -311,6 +328,20 @@ class AudioCommander:
             print(f"[AudioCommander] sox method failed ({e}), using fallback")
             self.speaker_off(300)
         finally:
+            # Ensure sox doesn't linger if pw-play died early
+            for p in (pw_proc, sox_proc):
+                if p is None:
+                    continue
+                try:
+                    p.wait(timeout=1)
+                except subprocess.TimeoutExpired:
+                    try:
+                        p.kill()
+                        p.wait(timeout=1)
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
             # Reset stopping flag AFTER speaker_off tone is done
             self._stopping = False
 
@@ -345,13 +376,20 @@ class AudioCommander:
 
             if proc:
                 try:
+                    # 30s: covers long sentences over Bluetooth (~3 words/sec floor)
                     proc.wait(timeout=30)
                 except subprocess.TimeoutExpired:
                     print("[AudioCommander] speak script timed out")
                     proc.kill()
 
+            # Only clear if our proc is still the tracked one — avoids racing
+            # with another speak() call that already replaced the reference.
             with self._proc_lock:
-                self._espeak_proc = None
+                if self._espeak_proc is proc:
+                    self._espeak_proc = None
+
+            # speak_pi.sh ends with speaker_off, so we're back in command mode
+            self._in_command_mode = True
 
         except FileNotFoundError:
             print(f"[AudioCommander] speak_pi.sh not found at {script_path}")
@@ -388,13 +426,20 @@ class AudioCommander:
 
             if proc:
                 try:
+                    # 15s: pre-recorded WAVs are short; cap covers BT latency only
                     proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     print("[AudioCommander] speak_phrase timed out")
                     proc.kill()
 
+            # Only clear if our proc is still the tracked one — avoids racing
+            # with another speak() call that already replaced the reference.
             with self._proc_lock:
-                self._espeak_proc = None
+                if self._espeak_proc is proc:
+                    self._espeak_proc = None
+
+            # speak_phrase.sh ends with speaker_off, so we're back in command mode
+            self._in_command_mode = True
 
         except FileNotFoundError:
             print(f"[AudioCommander] speak_phrase.sh not found at {script_path}")

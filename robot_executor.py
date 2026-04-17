@@ -34,6 +34,9 @@ class RobotCommandExecutor:
     - Speaker Off: 4650 Hz
     """
 
+    # Don't retry connection more than once every RECONNECT_BACKOFF seconds.
+    RECONNECT_BACKOFF = 30.0
+
     def __init__(self, volume: float = 0.5, robot_url: Optional[str] = None):
         """
         Initialize the robot executor.
@@ -47,6 +50,7 @@ class RobotCommandExecutor:
         self.connected = False
         self.audio = None
         self._cancel_pattern = False  # Flag to cancel running patterns
+        self._last_connect_attempt = 0.0  # Wall-clock of last connect() try
 
         # Movement durations (ms)
         self.step_duration = 500
@@ -67,6 +71,7 @@ class RobotCommandExecutor:
 
     def connect(self) -> bool:
         """Initialize audio connection"""
+        self._last_connect_attempt = time.time()
         try:
             if AudioCommander is not None:
                 self.audio = AudioCommander(volume=self.volume)
@@ -81,6 +86,15 @@ class RobotCommandExecutor:
             print(f"[Robot] Connection error: {e}")
             self.connected = False
             return False
+
+    def _try_reconnect(self) -> bool:
+        """Attempt a reconnect, throttled by RECONNECT_BACKOFF."""
+        if self.connected and self.audio:
+            return True
+        if time.time() - self._last_connect_attempt < self.RECONNECT_BACKOFF:
+            return False
+        print("[Robot] Attempting reconnect...")
+        return self.connect()
 
     def stop(self):
         """Stop any current movement/audio"""
@@ -105,7 +119,9 @@ class RobotCommandExecutor:
             CommandResult with success status
         """
         if not self.connected or not self.audio:
-            return CommandResult(False, "Not connected")
+            # Lazy reconnect — Bluetooth may have come back since startup
+            if not self._try_reconnect():
+                return CommandResult(False, "Not connected")
 
         command = command.strip()
         cmd_lower = command.lower()
