@@ -467,17 +467,15 @@ def draw_detections(frame, detections):
 def mjpeg_encoder_loop():
     """Background thread that encodes JPEG once for all clients.
 
-    Skips encoding when the system is idle to save CPU — the client's last
-    cached frame stays on-screen until the operator resumes. When a frame is
-    encoded it signals frame_ready_event so generate_mjpeg unblocks quickly.
+    Always encodes when there's a camera frame, regardless of system_state
+    ['running']. The camera thread runs continuously after init_system, and
+    operators should see the live feed the moment they open the dashboard
+    (even before clicking Start). Sets first_frame_event once cached bytes
+    are ready so generate_mjpeg unblocks.
     """
     global cached_mjpeg_bytes
 
     while not system_state['shutdown']:
-        if not system_state['running'] or system_state.get('paused'):
-            time.sleep(0.2)
-            continue
-
         with frame_lock:
             frame = annotated_frame if annotated_frame is not None else current_frame
 
@@ -2052,6 +2050,28 @@ def api_describe():
     return jsonify({'status': 'ok', 'description': description})
 
 
+def _eye_react_to_command(cmd_lower):
+    """Update eye expression to match a command. Safe no-op if eye is disabled."""
+    if not eye_display:
+        return
+    mark_activity()
+    if cmd_lower == 'left':
+        eye_display.set_expression(EyeDisplay.EXPR_LOOKING_LEFT)
+    elif cmd_lower == 'right':
+        eye_display.set_expression(EyeDisplay.EXPR_LOOKING_RIGHT)
+    elif cmd_lower == 'forward':
+        eye_display.set_expression(EyeDisplay.EXPR_LOOKING_UP)
+    elif cmd_lower == 'backward':
+        eye_display.set_expression(EyeDisplay.EXPR_LOOKING_DOWN)
+    elif 'speak' in cmd_lower or 'phrase' in cmd_lower:
+        eye_display.blink()
+        eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
+    elif cmd_lower == 'dance':
+        eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
+    elif cmd_lower == 'stop' or cmd_lower == 'speaker_off':
+        eye_display.set_expression(EyeDisplay.EXPR_NORMAL)
+
+
 @app.route('/api/command', methods=['POST'])
 def api_command():
     data = request.json or {}
@@ -2059,55 +2079,58 @@ def api_command():
     if not cmd:
         return jsonify({'status': 'error', 'message': 'No command provided'})
 
-    # Eye display reactions to commands
-    if eye_display:
-        mark_activity()
-        cmd_lower = cmd.lower()
-        if cmd_lower == 'left':
-            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_LEFT)
-        elif cmd_lower == 'right':
-            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_RIGHT)
-        elif cmd_lower == 'forward':
-            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_UP)
-        elif cmd_lower == 'backward':
-            eye_display.set_expression(EyeDisplay.EXPR_LOOKING_DOWN)
-        elif 'speak' in cmd_lower or 'phrase' in cmd_lower:
-            eye_display.blink()
-            eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
-        elif cmd_lower == 'dance':
-            eye_display.set_expression(EyeDisplay.EXPR_HAPPY)
-        elif cmd_lower == 'stop' or cmd_lower == 'speaker_off':
-            eye_display.set_expression(EyeDisplay.EXPR_NORMAL)
+    cmd_lower = cmd.lower()
 
-    if robot and robot.connected:
-        # Special handling for speaker_off - kills speech and sends speaker off tone.
-        # Stays synchronous because it must preempt any running speech immediately.
-        if cmd == 'speaker_off':
-            if robot.audio:
-                robot.audio.stop_speaking()
-                return jsonify({'status': 'ok', 'result': True, 'message': 'Speaker off sent'})
-            return jsonify({'status': 'error', 'message': 'Audio not available'})
+    if not (robot and robot.connected):
+        return jsonify({'status': 'error', 'message': 'Robot not connected'})
 
-        # Dispatch asynchronously under executing_lock so the Flask request
-        # doesn't block on long-running commands (patterns ~5-10s, speech up
-        # to 30s) and doesn't race with autonomous nav from process_loop.
+    # Preempt path: speaker_off and stop must interrupt whatever is running.
+    # Checking executing_lock would make the Stop button useless mid-pattern.
+    if cmd_lower == 'speaker_off':
+        _eye_react_to_command(cmd_lower)
+        if robot.audio:
+            robot.audio.stop_speaking()
+            return jsonify({'status': 'ok', 'result': True, 'message': 'Speaker off sent'})
+        return jsonify({'status': 'error', 'message': 'Audio not available'})
+    if cmd_lower == 'stop':
+        _eye_react_to_command(cmd_lower)
+        try:
+            robot.stop()  # sets _cancel_pattern + audio.stop() — reapable mid-pattern
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': f'stop failed: {e}'}), 500
+        return jsonify({'status': 'ok', 'result': True, 'message': 'Stopped'})
+
+    # Everything else runs asynchronously under executing_lock so the Flask
+    # request doesn't block on patterns (~5-10s) or speech (up to 30s) and
+    # can't race with process_loop's autonomous dispatch.
+    global is_executing
+    with executing_lock:
+        if is_executing:
+            return jsonify({'status': 'busy', 'message': 'Robot executing another command'}), 409
+        is_executing = True
+
+    def _run_manual(c):
         global is_executing
-        with executing_lock:
-            if is_executing:
-                return jsonify({'status': 'busy', 'message': 'Robot executing another command'}), 409
-            is_executing = True
+        try:
+            robot.execute(c)
+        finally:
+            with executing_lock:
+                is_executing = False
 
-        def _run_manual(c):
-            global is_executing
-            try:
-                robot.execute(c)
-            finally:
-                with executing_lock:
-                    is_executing = False
+    # Update the eye only once we're committed to dispatching — keeps the eye
+    # from jerking around during a click storm that returns 409.
+    _eye_react_to_command(cmd_lower)
 
+    try:
         threading.Thread(target=_run_manual, args=(cmd,), daemon=True).start()
-        return jsonify({'status': 'queued', 'command': cmd})
-    return jsonify({'status': 'error', 'message': 'Robot not connected'})
+    except Exception as e:
+        # Thread creation failed (extremely rare) — release the slot we reserved
+        # so the next command isn't stuck at 409 forever.
+        with executing_lock:
+            is_executing = False
+        return jsonify({'status': 'error', 'message': f'dispatch failed: {e}'}), 500
+
+    return jsonify({'status': 'queued', 'command': cmd})
 
 
 @app.route('/api/status', methods=['GET'])
