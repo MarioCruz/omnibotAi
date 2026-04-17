@@ -51,6 +51,9 @@ Thumbs.db
 # Ollama models (too large for git)
 models/
 
+# Blog drafts (personal use only)
+blog-draft*
+
 # Claude config files (except root)
 **/claude.md
 **/CLAUDE.md

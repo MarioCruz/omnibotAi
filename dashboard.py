@@ -7,12 +7,14 @@ Live camera stream with detection overlays, LLM commands, and robot controls
 import io
 import json
 import logging
+import re
 import subprocess
 import threading
 import time
 import os
 import cv2
 import numpy as np
+import requests
 from flask import Flask, Response, render_template_string, jsonify, request
 
 # Task logging — captures every decision cycle when a mission is active
@@ -88,13 +90,32 @@ frame_lock = threading.Lock()
 current_frame = None
 annotated_frame = None
 
-# Eye display activity tracking
+# Eye display activity tracking — accessed from process_loop and Flask request threads
+activity_lock = threading.Lock()
 last_activity_time = time.time()
 IDLE_TIMEOUT = 30  # Seconds before going sleepy
+
+# Guards the "robot is currently running a command sequence" flag. Without it,
+# two paths could both observe is_executing=False and double-dispatch commands.
+executing_lock = threading.Lock()
+is_executing = False
 
 # Cached MJPEG bytes (encode once, share with all clients)
 mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
+
+
+def mark_activity():
+    """Record that the robot is doing something — used for eye idle timeout."""
+    global last_activity_time
+    with activity_lock:
+        last_activity_time = time.time()
+
+
+def get_idle_time():
+    """Seconds since last activity, thread-safe."""
+    with activity_lock:
+        return time.time() - last_activity_time
 
 
 def init_system(detector_backend='imx500', volume=0.5,
@@ -169,6 +190,7 @@ def process_loop():
     """Main processing loop - runs in background thread"""
     global current_frame, annotated_frame, system_state
 
+    last_stale_warn = 0.0
     while not system_state['shutdown']:
         if not system_state['running'] or system_state['paused']:
             time.sleep(0.1)
@@ -180,6 +202,12 @@ def process_loop():
             if frame is None:
                 time.sleep(0.1)
                 continue
+
+            # Detect a dead/stuck capture thread — warn at most once per 10s
+            age = camera.frame_age() if hasattr(camera, 'frame_age') else None
+            if age is not None and age > 5.0 and time.time() - last_stale_warn > 10.0:
+                print(f"[Dashboard] Warning: camera frame is {age:.1f}s old — capture thread may be stuck")
+                last_stale_warn = time.time()
 
             with frame_lock:
                 current_frame = frame  # Already a copy from get_frame_and_metadata()
@@ -195,11 +223,13 @@ def process_loop():
                 system_state['stats']['total_detections'] += len(detections)
                 # Limit stored detections to prevent unbounded memory growth
                 system_state['detections'] = detections[:100]
+                # Keep last non-empty detections for describe endpoint
+                if detections:
+                    system_state['last_detections'] = detections[:10]
 
             # Eye display reactions to detections
             if eye_display and detections:
-                global last_activity_time
-                last_activity_time = time.time()
+                mark_activity()
                 # Check what we detected
                 labels = [d['label'].lower() for d in detections]
                 if 'person' in labels:
@@ -227,10 +257,19 @@ def process_loop():
                 )
                 task_logger.debug(f"DETECT [{system_state['task']}] {det_summary}")
 
-                # Skip if robot is still executing previous commands
-                if getattr(process_loop, '_executing', False):
-                    task_logger.debug("SKIP busy executing previous commands")
-                else:
+                # Skip if robot is still executing previous commands.
+                # Reserve the slot under a lock to prevent two iterations from
+                # both observing the flag false and double-dispatching.
+                global is_executing
+                claimed = False
+                with executing_lock:
+                    if is_executing:
+                        task_logger.debug("SKIP busy executing previous commands")
+                    else:
+                        is_executing = True
+                        claimed = True
+
+                if claimed:
                     commands = nav.generate_commands(detections, context=system_state['task'])
 
                     debug = nav.last_debug
@@ -242,18 +281,23 @@ def process_loop():
                     # Execute commands in background to avoid blocking detection pipeline
                     if commands and robot and robot.connected:
                         cmds_to_run = commands[:3]
-                        process_loop._executing = True
                         task_logger.info(f"EXEC {cmds_to_run}")
                         def _run_commands(cmds):
+                            global is_executing
                             try:
                                 for cmd in cmds:
                                     if not system_state['running']:
                                         break
                                     robot.execute(cmd)
                             finally:
-                                process_loop._executing = False
+                                with executing_lock:
+                                    is_executing = False
                                 task_logger.debug("EXEC done")
                         threading.Thread(target=_run_commands, args=(cmds_to_run,), daemon=True).start()
+                    else:
+                        # Nothing to dispatch — release the slot we reserved
+                        with executing_lock:
+                            is_executing = False
 
             # Update stats
             system_state['last_commands'] = commands[:20]
@@ -272,8 +316,7 @@ def process_loop():
 
             # Eye display idle behavior - go sleepy after inactivity
             if eye_display and not detections:
-                idle_time = time.time() - last_activity_time
-                if idle_time > IDLE_TIMEOUT:
+                if get_idle_time() > IDLE_TIMEOUT:
                     eye_display.set_expression(EyeDisplay.EXPR_SLEEPY)
 
             time.sleep(0.5)  # Process every 0.5 seconds
@@ -582,8 +625,13 @@ DASHBOARD_HTML = """
                     <button class="btn-stop" onclick="stopSystem()">Stop</button>
                 </div>
                 <div class="task-input">
-                    <input type="text" id="taskInput" placeholder="Enter task (e.g., Find and greet people)" value="Explore and interact with objects">
+                    <input type="text" id="taskInput" placeholder="Enter task (e.g., Find the person)" value="Find the person">
                     <button onclick="setTask()">Set Task</button>
+                    <button onclick="endTask()" style="background:#ff922b;">End Task</button>
+                    <button onclick="describeScene()" style="background:#aa44ff; color:#fff;">Describe</button>
+                    <label style="display:flex; align-items:center; gap:5px; font-size:12px; color:#888; cursor:pointer;">
+                        <input type="checkbox" id="speakLocal" checked> Speak here
+                    </label>
                 </div>
             </div>
 
@@ -780,6 +828,38 @@ DASHBOARD_HTML = """
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ task: task })
             }).then(() => log('Task set: ' + task, 'info'));
+        }
+
+        function endTask() {
+            fetch('/api/task/end', { method: 'POST' }).then(() => {
+                log('Task ended', 'info');
+            });
+        }
+
+        function describeScene() {
+            const speakLocal = document.getElementById('speakLocal').checked;
+            log('Asking robot to describe what it sees...', 'info');
+            fetch('/api/describe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ speak_robot: !speakLocal })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.description) {
+                        log('Robot says: ' + data.description, 'success');
+                        if (speakLocal && window.speechSynthesis) {
+                            window.speechSynthesis.cancel();
+                            const utter = new SpeechSynthesisUtterance(data.description);
+                            utter.rate = 1.0;
+                            utter.pitch = 0.9;
+                            window.speechSynthesis.speak(utter);
+                        }
+                    } else if (data.error) {
+                        log('Describe error: ' + data.error, 'error');
+                    }
+                })
+                .catch(() => log('Describe request failed', 'error'));
         }
 
         function sendCommand(cmd) {
@@ -1425,6 +1505,12 @@ KIDS_DASHBOARD_HTML = """
                 <div class="led bluetooth" id="btLed"></div>
                 <span class="status-text off" id="btText">BT OFF</span>
             </div>
+            <div class="led-cluster">
+                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                    <input type="checkbox" id="speakLocal" checked>
+                    <span class="status-text" style="color:var(--neon-yellow);">SPEAK HERE</span>
+                </label>
+            </div>
         </div>
 
         <div class="power-section">
@@ -1458,6 +1544,14 @@ KIDS_DASHBOARD_HTML = """
             <button class="arcade-btn cyan" onclick="sayHello()">
                 <span class="icon">📢</span>
                 <span>Speak</span>
+            </button>
+            <button class="arcade-btn cyan" onclick="describeScene()">
+                <span class="icon">👁</span>
+                <span>What See?</span>
+            </button>
+            <button class="arcade-btn orange" onclick="endMission()">
+                <span class="icon">✋</span>
+                <span>End Mission</span>
             </button>
             <button class="arcade-btn red" onclick="speakerOff()">
                 <span class="icon">🔇</span>
@@ -1622,6 +1716,42 @@ KIDS_DASHBOARD_HTML = """
             });
         }
 
+        function endMission() {
+            const missionEl = document.getElementById('missionText');
+            missionEl.textContent = 'AWAITING ORDERS...';
+            missionEl.className = 'mission-text none';
+            fetch('/api/task/end', { method: 'POST' });
+        }
+
+        function describeScene() {
+            const missionEl = document.getElementById('missionText');
+            const speakLocal = document.getElementById('speakLocal').checked;
+            missionEl.textContent = 'THINKING...';
+            missionEl.className = 'mission-text';
+            fetch('/api/describe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ speak_robot: !speakLocal })
+            })
+                .then(r => r.json())
+                .then(data => {
+                    const text = data.description || data.error || 'NO RESPONSE';
+                    missionEl.textContent = text;
+                    if (speakLocal && window.speechSynthesis) {
+                        window.speechSynthesis.cancel();
+                        const utter = new SpeechSynthesisUtterance(text);
+                        utter.rate = 1.0;
+                        utter.pitch = 0.9;
+                        window.speechSynthesis.speak(utter);
+                    }
+                    setTimeout(() => {
+                        missionEl.textContent = 'AWAITING ORDERS...';
+                        missionEl.className = 'mission-text none';
+                    }, 10000);
+                })
+                .catch(() => { missionEl.textContent = 'ERROR'; });
+        }
+
         function checkBluetooth() {
             fetch('/api/bluetooth')
                 .then(r => r.json())
@@ -1693,14 +1823,96 @@ def api_pause():
 @app.route('/api/task', methods=['POST'])
 def api_task():
     data = request.json or {}
-    system_state['task'] = data.get('task', 'Explore')
-    task_logger.info(f"=== TASK SET: {system_state['task']} ===")
-    return jsonify({'status': 'ok', 'task': system_state['task']})
+    raw = data.get('task', 'Explore')
+    if not isinstance(raw, str):
+        return jsonify({'status': 'error', 'message': 'task must be a string'}), 400
+    # Strip control chars, cap length — task strings end up in log lines.
+    cleaned = re.sub(r'[^a-zA-Z0-9\s.,!?\'\"-]', '', raw)[:200].strip()
+    if not cleaned:
+        return jsonify({'status': 'error', 'message': 'task is empty after sanitization'}), 400
+    system_state['task'] = cleaned
+    task_logger.info(f"=== TASK SET: {cleaned} ===")
+    return jsonify({'status': 'ok', 'task': cleaned})
+
+
+@app.route('/api/task/end', methods=['POST'])
+def api_task_end():
+    """End the current task without stopping the system (detection continues)."""
+    if system_state['task']:
+        task_logger.info(f"=== TASK ENDED: {system_state['task']} ===")
+    system_state['task'] = None
+    return jsonify({'status': 'ok', 'task': None})
+
+
+@app.route('/api/describe', methods=['POST'])
+def api_describe():
+    """Use LLM to describe what the robot currently sees, optionally speak through robot."""
+    data = request.json or {}
+    speak_robot = data.get('speak_robot', True)
+    detections = system_state.get('last_detections', []) or system_state.get('detections', [])
+    if not detections:
+        return jsonify({'error': 'No objects detected right now'})
+
+    # Build a simple description from detections
+    objects = [f"{d['label']} ({d['confidence']:.0%})" for d in detections[:5]]
+    det_text = ', '.join(objects)
+
+    # Try Groq LLM for a natural description
+    api_key = os.environ.get('GROQ_API_KEY')
+    description = None
+    if api_key:
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": "llama-3.3-70b-versatile",
+                    "messages": [
+                        {"role": "system", "content": "You are a robot. Say what you see in under 10 words. No punctuation except periods. No dashes or special characters. Simple words only."},
+                        {"role": "user", "content": f"What do you see: {det_text}"}
+                    ],
+                    "temperature": 0.5,
+                    "max_tokens": 30,
+                },
+                timeout=15
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            choices = payload.get('choices') or []
+            if choices:
+                content = (choices[0].get('message') or {}).get('content')
+                if content:
+                    description = content.strip()
+            if not description:
+                print(f"[Describe] Groq returned no content: {payload}")
+        except Exception as e:
+            print(f"[Describe] Groq error: {e}")
+
+    # Fallback to simple description if no LLM
+    if not description:
+        count = len(detections)
+        labels = list(set(d['label'] for d in detections[:5]))
+        description = f"I can see {count} things: {', '.join(labels)}"
+
+    # Clean up for speech (strip special chars, limit length)
+    speak_text = re.sub(r'[^a-zA-Z0-9\s.,!?\'-]', '', description)[:100]
+
+    # Bind robot.audio to a local before use — robot could be torn down between
+    # the check and the dereference in another thread.
+    audio = robot.audio if (robot and robot.connected) else None
+    if speak_robot and audio and speak_text:
+        threading.Thread(
+            target=audio.speak,
+            args=(speak_text,),
+            daemon=True
+        ).start()
+
+    task_logger.info(f"DESCRIBE: {description}")
+    return jsonify({'status': 'ok', 'description': description})
 
 
 @app.route('/api/command', methods=['POST'])
 def api_command():
-    global last_activity_time
     data = request.json or {}
     cmd = data.get('command', '')
     if not cmd:
@@ -1708,7 +1920,7 @@ def api_command():
 
     # Eye display reactions to commands
     if eye_display:
-        last_activity_time = time.time()
+        mark_activity()
         cmd_lower = cmd.lower()
         if cmd_lower == 'left':
             eye_display.set_expression(EyeDisplay.EXPR_LOOKING_LEFT)
