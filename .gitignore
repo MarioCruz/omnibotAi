@@ -41,8 +41,10 @@ key.pem
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs (incl. RotatingFileHandler backups like task.log.1)
 *.log
+*.log.*
+logs/
 
 # Local config
 .env

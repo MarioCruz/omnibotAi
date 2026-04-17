@@ -17,12 +17,20 @@ import numpy as np
 import requests
 from flask import Flask, Response, render_template_string, jsonify, request
 
-# Task logging — captures every decision cycle when a mission is active
+# Task logging — captures every decision cycle when a mission is active.
+# Rotates at 5MB with 3 backups so the SD card doesn't fill up on a long run.
+from logging.handlers import RotatingFileHandler
+
 task_logger = logging.getLogger('task')
 task_logger.setLevel(logging.DEBUG)
+task_logger.propagate = False  # Don't duplicate to root/stdout
 _log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
 os.makedirs(_log_dir, exist_ok=True)
-_task_handler = logging.FileHandler(os.path.join(_log_dir, 'task.log'))
+_task_handler = RotatingFileHandler(
+    os.path.join(_log_dir, 'task.log'),
+    maxBytes=5 * 1024 * 1024,  # 5 MB
+    backupCount=3,
+)
 _task_handler.setFormatter(logging.Formatter('%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S'))
 task_logger.addHandler(_task_handler)
 from flask_cors import CORS
@@ -103,6 +111,15 @@ is_executing = False
 # Cached MJPEG bytes (encode once, share with all clients)
 mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
+
+# Health / watchdog state
+process_start_time = time.time()
+last_detection_time = 0.0  # Wall-clock of most recent non-empty detection
+
+# If the camera is stuck this long, exit 1 so systemd restarts the process.
+# Below this threshold, /healthz reports "degraded" but stays alive.
+CAMERA_STALE_DEGRADED_SEC = 10
+CAMERA_STALE_FATAL_SEC = 60
 
 
 def mark_activity():
@@ -203,11 +220,16 @@ def process_loop():
                 time.sleep(0.1)
                 continue
 
-            # Detect a dead/stuck capture thread — warn at most once per 10s
+            # Detect a dead/stuck capture thread — warn at most once per 10s,
+            # and if it stays stuck past CAMERA_STALE_FATAL_SEC, exit so
+            # systemd restarts the whole process cleanly.
             age = camera.frame_age() if hasattr(camera, 'frame_age') else None
-            if age is not None and age > 5.0 and time.time() - last_stale_warn > 10.0:
+            if age is not None and age > CAMERA_STALE_DEGRADED_SEC and time.time() - last_stale_warn > 10.0:
                 print(f"[Dashboard] Warning: camera frame is {age:.1f}s old — capture thread may be stuck")
                 last_stale_warn = time.time()
+            if age is not None and age > CAMERA_STALE_FATAL_SEC:
+                print(f"[Dashboard] FATAL: camera frame {age:.1f}s old, exiting for systemd restart")
+                os._exit(1)
 
             with frame_lock:
                 current_frame = frame  # Already a copy from get_frame_and_metadata()
@@ -226,6 +248,8 @@ def process_loop():
                 # Keep last non-empty detections for describe endpoint
                 if detections:
                     system_state['last_detections'] = detections[:10]
+                    global last_detection_time
+                    last_detection_time = time.time()
 
             # Eye display reactions to detections
             if eye_display and detections:
@@ -1977,8 +2001,58 @@ def api_bluetooth():
 
 
 @app.route('/health')
+@app.route('/healthz')
 def health():
-    return jsonify({'status': 'ok'})
+    """Structured health snapshot for monitors and the dashboard badge.
+
+    Returns 200 when ok, 503 when any subsystem is degraded (camera stuck,
+    robot disconnected during an active task, or the process loop is idle).
+    """
+    now = time.time()
+    cam_age = camera.frame_age() if (camera and hasattr(camera, 'frame_age')) else None
+    eye_alive = bool(eye_display and getattr(eye_display, 'running', False))
+    robot_connected = bool(robot and robot.connected)
+    last_det_ago = (now - last_detection_time) if last_detection_time else None
+
+    subsystems = {
+        'camera': {
+            'age_seconds': round(cam_age, 2) if cam_age is not None else None,
+            'fps': camera.get_fps() if camera else 0,
+            'stale': cam_age is not None and cam_age > CAMERA_STALE_DEGRADED_SEC,
+        },
+        'robot': {
+            'connected': robot_connected,
+        },
+        'eye': {
+            'alive': eye_alive,
+        },
+        'process': {
+            'uptime_seconds': round(now - process_start_time, 1),
+            'running': bool(system_state.get('running')),
+            'paused': bool(system_state.get('paused')),
+            'task': system_state.get('task'),
+        },
+        'detection': {
+            'last_ago_seconds': round(last_det_ago, 1) if last_det_ago is not None else None,
+        },
+    }
+
+    # Degraded if any core subsystem is unhealthy during active operation.
+    degraded = False
+    reasons = []
+    if subsystems['camera']['stale']:
+        degraded = True
+        reasons.append(f"camera stale {subsystems['camera']['age_seconds']}s")
+    if system_state.get('task') and not robot_connected:
+        degraded = True
+        reasons.append("robot disconnected during active task")
+
+    payload = {
+        'status': 'degraded' if degraded else 'ok',
+        'reasons': reasons,
+        'subsystems': subsystems,
+    }
+    return jsonify(payload), (503 if degraded else 200)
 
 
 def shutdown_system():
