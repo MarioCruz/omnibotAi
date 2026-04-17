@@ -5,7 +5,7 @@
 
 SPKON_FREQ=1422
 SPKOFF_FREQ=4650
-TONE_DURATION=0.3
+TONE_DURATION=0.2
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PHRASE_DIR="$SCRIPT_DIR/audio_phrases"
@@ -28,15 +28,15 @@ if [ ! -f "$WAV_FILE" ]; then
     exec "$SCRIPT_DIR/speak_pi.sh" "$PHRASE"
 fi
 
-# Play Speaker On tone
+# Play Speaker On tone (brief relay settle before/after)
 sox -n -t wav - synth $TONE_DURATION sine $SPKON_FREQ gain -5 2>/dev/null | pw-play -
-sleep 0.2
+sleep 0.1
 
 # Play the WAV file
 echo "Playing: $PHRASE"
 pw-play "$WAV_FILE"
 
-sleep 0.3
+sleep 0.15
 
 # Play Speaker Off tone
 sox -n -t wav - synth $TONE_DURATION sine $SPKOFF_FREQ gain -5 2>/dev/null | pw-play -

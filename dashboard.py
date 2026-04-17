@@ -997,7 +997,18 @@ DASHBOARD_HTML = """
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ command: cmd })
-            }).then(() => log('Command: ' + cmd, 'info'));
+            })
+                .then(r => r.json().then(data => ({ status: r.status, data })))
+                .then(({ status, data }) => {
+                    if (status === 409 || data.status === 'busy') {
+                        log('Busy, try again: ' + cmd, 'error');
+                    } else if (data.status === 'error') {
+                        log('Error (' + cmd + '): ' + (data.message || 'unknown'), 'error');
+                    } else {
+                        log('Command: ' + cmd, 'info');
+                    }
+                })
+                .catch(() => log('Command failed: ' + cmd, 'error'));
         }
 
         function speakText() {
@@ -1814,45 +1825,46 @@ KIDS_DASHBOARD_HTML = """
             }
         }
 
-        function drive(direction) {
-            fetch('/api/command', {
+        // Shared helper so "busy" feedback is consistent across kid buttons.
+        // Without this, a 409 silently drops and it looks like the click did nothing.
+        function kidCommand(cmd, missionLabel) {
+            const missionEl = document.getElementById('missionText');
+            if (missionLabel) {
+                missionEl.textContent = missionLabel;
+                missionEl.className = 'mission-text';
+            }
+            return fetch('/api/command', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: direction })
-            });
+                body: JSON.stringify({ command: cmd })
+            })
+                .then(r => r.json().then(data => ({ status: r.status, data })))
+                .then(({ status, data }) => {
+                    if (status === 409 || data.status === 'busy') {
+                        missionEl.textContent = 'BUSY — TRY AGAIN';
+                        missionEl.className = 'mission-text';
+                    }
+                })
+                .catch(() => {
+                    missionEl.textContent = 'ERROR';
+                    missionEl.className = 'mission-text';
+                });
+        }
+
+        function drive(direction) {
+            kidCommand(direction, null);
         }
 
         function doDance() {
-            const missionEl = document.getElementById('missionText');
-            missionEl.textContent = 'DANCE MODE';
-            missionEl.className = 'mission-text';
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: 'dance' })
-            });
+            kidCommand('dance', 'DANCE MODE');
         }
 
         function sayHello() {
-            const missionEl = document.getElementById('missionText');
-            missionEl.textContent = 'VOICE OUTPUT';
-            missionEl.className = 'mission-text';
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: 'phrase("omnibot")' })
-            });
+            kidCommand('phrase("omnibot")', 'VOICE OUTPUT');
         }
 
         function speakerOff() {
-            const missionEl = document.getElementById('missionText');
-            missionEl.textContent = 'SPEAKER OFF';
-            missionEl.className = 'mission-text';
-            fetch('/api/command', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ command: 'speaker_off' })
-            });
+            kidCommand('speaker_off', 'SPEAKER OFF');
         }
 
         function endMission() {
