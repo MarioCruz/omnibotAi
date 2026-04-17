@@ -58,7 +58,18 @@ class RobotCommandExecutor:
 
         # Pattern definitions
         self.patterns = {
-            'dance': ['left', 'right', 'left', 'right', 'forward', 'backward'],
+            'dance': [
+                # Opening shimmy
+                'left', 'right', 'left', 'right',
+                # Forward/back bop
+                'forward', 'backward', 'forward', 'backward',
+                # Spin left
+                'left', 'left', 'left', 'left',
+                # Spin right
+                'right', 'right', 'right', 'right',
+                # Finisher groove
+                'forward', 'left', 'right', 'backward',
+            ],
             'circle': ['forward', 'left'] * 4,
             'square': ['forward', 'left', 'forward', 'left', 'forward', 'left', 'forward', 'left'],
             'triangle': ['forward', 'left', 'forward', 'left', 'forward', 'left'],
