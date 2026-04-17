@@ -39,14 +39,27 @@ from flask_socketio import SocketIO, emit
 # Load environment variables from .env file
 def load_env():
     env_path = os.path.join(os.path.dirname(__file__), '.env')
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    os.environ[key.strip()] = value.strip()
-                    print(f"[Env] Loaded {key.strip()}")
+    if not os.path.exists(env_path):
+        return
+    loaded = 0
+    with open(env_path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            # Strip surrounding matching quotes so FOO="bar" and FOO='bar' work.
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            os.environ[key] = value
+            loaded += 1
+    # Log the count only — never the names, since they often reveal which
+    # third-party services (Groq, Gemini, etc.) are in use.
+    if loaded:
+        print(f"[Env] Loaded {loaded} variable(s) from .env")
+
 
 load_env()
 
@@ -59,12 +72,36 @@ from eye_display import EyeDisplay
 
 
 def load_config():
-    """Load robot configuration from config.json"""
+    """Load robot configuration from config.json.
+
+    A malformed or unreadable config file falls back to defaults instead of
+    crashing startup — otherwise systemd would flap the service on a bad
+    deploy before anyone could fix it.
+    """
     config_path = os.path.join(os.path.dirname(__file__), 'config.json')
-    if os.path.exists(config_path):
+    if not os.path.exists(config_path):
+        return {}
+    try:
         with open(config_path) as f:
-            return json.load(f)
-    return {}
+            cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                print(f"[Config] {config_path} is not a JSON object, using defaults")
+                return {}
+            return cfg
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"[Config] ERROR reading {config_path}: {e} — using defaults")
+        return {}
+
+
+def _cfg_int(cfg, key, default):
+    """Read an int from config, falling back to default on any type error."""
+    v = cfg.get(key, default)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        print(f"[Config] {key}={v!r} is not an int, using default {default}")
+        return default
+
 
 robot_config = load_config()
 
@@ -85,7 +122,10 @@ system_state = {
         'total_detections': 0,
         'total_commands': 0,
         'fps': 0
-    }
+    },
+    # Collected during init_system(). Non-empty means /healthz reports degraded
+    # so an operator can see what's wrong without reading journalctl.
+    'init_errors': [],
 }
 
 # Components
@@ -111,10 +151,21 @@ is_executing = False
 # Cached MJPEG bytes (encode once, share with all clients)
 mjpeg_lock = threading.Lock()
 cached_mjpeg_bytes = None
+# Set once after the first frame is encoded. Stays set. New MJPEG clients
+# wait on this before entering the steady-state 30fps polling loop so they
+# don't busy-spin during cold start.
+first_frame_event = threading.Event()
 
 # Health / watchdog state
 process_start_time = time.time()
 last_detection_time = 0.0  # Wall-clock of most recent non-empty detection
+
+# Cached Bluetooth status — the actual bluetoothctl call is done in a
+# background thread (see bt_poll_loop) so /api/bluetooth never blocks
+# the Flask worker on a hung BT stack. Kids dashboard polls this heavily.
+bt_cache_lock = threading.Lock()
+bt_cache = {'connected': False, 'devices': [], 'updated_at': 0.0}
+BT_POLL_INTERVAL = 5.0  # Seconds between bluetoothctl probes
 
 # If the camera is stuck this long, exit 1 so systemd restarts the process.
 # Below this threshold, /healthz reports "degraded" but stays alive.
@@ -149,6 +200,7 @@ def init_system(detector_backend='imx500', volume=0.5,
         detector = ObjectDetector(backend=detector_backend)
     except Exception as e:
         print(f"[Dashboard] Detector error: {e}")
+        system_state['init_errors'].append(f"detector: {e}")
         detector = None
 
     # Camera - pass IMX500 instance and intrinsics for hardware-accelerated detection
@@ -156,10 +208,15 @@ def init_system(detector_backend='imx500', volume=0.5,
     imx500_instance = detector.get_imx500() if detector and detector_backend == 'imx500' else None
     intrinsics = detector.get_intrinsics() if detector and detector_backend == 'imx500' else None
     camera_resolution = (640, 480)
-    camera = CameraCapture(resolution=camera_resolution, framerate=30, imx500=imx500_instance, intrinsics=intrinsics)
+    try:
+        camera = CameraCapture(resolution=camera_resolution, framerate=30, imx500=imx500_instance, intrinsics=intrinsics)
+    except Exception as e:
+        print(f"[Dashboard] Camera error: {e}")
+        system_state['init_errors'].append(f"camera: {e}")
+        camera = None
 
     # Pass picam2 instance to detector for accurate coordinate conversion
-    if detector and detector_backend == 'imx500' and hasattr(camera, 'picam2'):
+    if detector and detector_backend == 'imx500' and camera and hasattr(camera, 'picam2'):
         detector.set_picam2(camera.picam2)
 
     # Navigation engine - rule-based, no LLM needed
@@ -172,8 +229,14 @@ def init_system(detector_backend='imx500', volume=0.5,
 
     # Robot - now uses audio tones for Tomy Omnibot
     print(f"[Dashboard] Initializing audio commander (volume: {volume})...")
-    robot = RobotCommandExecutor(volume=volume)
-    robot.connect()
+    try:
+        robot = RobotCommandExecutor(volume=volume)
+        if not robot.connect():
+            system_state['init_errors'].append("robot: connect() returned False")
+    except Exception as e:
+        print(f"[Dashboard] Robot error: {e}")
+        system_state['init_errors'].append(f"robot: {e}")
+        robot = None
 
     # Eye display - configurable via config.json: st7735, ssd1351, or none
     global eye_display
@@ -182,6 +245,7 @@ def init_system(detector_backend='imx500', volume=0.5,
         eye_display = None
     else:
         print(f"[Dashboard] Initializing eye display ({eye_display_type})...")
+        partially_initialized = None
         try:
             eye_display = EyeDisplay(
                 display_type=eye_display_type,
@@ -194,13 +258,26 @@ def init_system(detector_backend='imx500', volume=0.5,
                 offset_x=eye_offset_x,
                 offset_y=eye_offset_y,
             )
+            # If start() throws after __init__ opened the SPI handle, we
+            # need to tear the partial object down so the bus isn't leaked.
+            partially_initialized = eye_display
             eye_display.start()
+            partially_initialized = None  # Fully initialized, no cleanup needed
             print(f"[Dashboard] Eye display started ({eye_display_type})")
         except Exception as e:
             print(f"[Dashboard] Eye display not available: {e}")
+            system_state['init_errors'].append(f"eye: {e}")
+            if partially_initialized is not None:
+                try:
+                    partially_initialized.stop()
+                except Exception:
+                    pass
             eye_display = None
 
-    print("[Dashboard] System ready!")
+    if system_state['init_errors']:
+        print(f"[Dashboard] Init completed with {len(system_state['init_errors'])} error(s); /healthz will report degraded")
+    else:
+        print("[Dashboard] System ready!")
 
 
 def process_loop():
@@ -388,10 +465,19 @@ def draw_detections(frame, detections):
 
 
 def mjpeg_encoder_loop():
-    """Background thread that encodes JPEG once for all clients."""
+    """Background thread that encodes JPEG once for all clients.
+
+    Skips encoding when the system is idle to save CPU — the client's last
+    cached frame stays on-screen until the operator resumes. When a frame is
+    encoded it signals frame_ready_event so generate_mjpeg unblocks quickly.
+    """
     global cached_mjpeg_bytes
 
     while not system_state['shutdown']:
+        if not system_state['running'] or system_state.get('paused'):
+            time.sleep(0.2)
+            continue
+
         with frame_lock:
             frame = annotated_frame if annotated_frame is not None else current_frame
 
@@ -404,6 +490,7 @@ def mjpeg_encoder_loop():
                                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
                     with mjpeg_lock:
                         cached_mjpeg_bytes = frame_bytes
+                    first_frame_event.set()
             except Exception as e:
                 print(f"[MJPEG] Encode error: {e}")
 
@@ -411,11 +498,20 @@ def mjpeg_encoder_loop():
 
 
 def generate_mjpeg():
-    """Generate MJPEG stream with detection overlays (uses cached bytes)."""
+    """Generate MJPEG stream — block on first_frame_event during cold start.
+
+    Before the encoder has ever produced a frame, wait on an Event instead
+    of busy-looping at 30Hz yielding nothing. Once any frame exists we go
+    into steady-state 30fps polling; the event stays set, so multiple
+    clients all proceed independently.
+    """
     while not system_state['shutdown']:
+        # Cold-start wait (cheap once set).
+        if not first_frame_event.wait(timeout=1.0):
+            continue
+
         with mjpeg_lock:
             frame_bytes = cached_mjpeg_bytes
-
         if frame_bytes is not None:
             yield frame_bytes
 
@@ -1998,25 +2094,50 @@ def api_status():
     return jsonify(system_state)
 
 
-@app.route('/api/bluetooth', methods=['GET'])
-def api_bluetooth():
-    """Check Bluetooth connection status."""
+def _poll_bluetooth_once():
+    """Shell out to bluetoothctl and return (connected, device_names)."""
     try:
         result = subprocess.run(
             ['bluetoothctl', 'devices', 'Connected'],
-            capture_output=True, text=True, timeout=3
+            capture_output=True, text=True, timeout=3,
         )
         devices = [line.strip() for line in result.stdout.strip().split('\n') if line.strip()]
-        connected = len(devices) > 0
-        # Parse device names (format: "Device XX:XX:XX:XX:XX:XX Name")
         names = []
         for dev in devices:
+            # Format: "Device XX:XX:XX:XX:XX:XX Name"
             parts = dev.split(' ', 2)
             if len(parts) >= 3:
                 names.append(parts[2])
-        return jsonify({'connected': connected, 'devices': names})
+        return (len(devices) > 0, names)
     except Exception:
-        return jsonify({'connected': False, 'devices': []})
+        return (False, [])
+
+
+def bt_poll_loop():
+    """Refresh Bluetooth status in the background every BT_POLL_INTERVAL seconds."""
+    while not system_state['shutdown']:
+        connected, names = _poll_bluetooth_once()
+        with bt_cache_lock:
+            bt_cache['connected'] = connected
+            bt_cache['devices'] = names
+            bt_cache['updated_at'] = time.time()
+        # Sleep in small chunks so shutdown is responsive.
+        for _ in range(int(BT_POLL_INTERVAL * 5)):
+            if system_state['shutdown']:
+                return
+            time.sleep(0.2)
+
+
+@app.route('/api/bluetooth', methods=['GET'])
+def api_bluetooth():
+    """Return the last cached Bluetooth status — never blocks on subprocess."""
+    with bt_cache_lock:
+        age = time.time() - bt_cache['updated_at'] if bt_cache['updated_at'] else None
+        return jsonify({
+            'connected': bt_cache['connected'],
+            'devices': list(bt_cache['devices']),
+            'age_seconds': round(age, 1) if age is not None else None,
+        })
 
 
 @app.route('/health')
@@ -2065,6 +2186,11 @@ def health():
     if system_state.get('task') and not robot_connected:
         degraded = True
         reasons.append("robot disconnected during active task")
+    init_errors = system_state.get('init_errors', [])
+    if init_errors:
+        degraded = True
+        for err in init_errors:
+            reasons.append(f"init: {err}")
 
     payload = {
         'status': 'degraded' if degraded else 'ok',
@@ -2115,14 +2241,14 @@ if __name__ == '__main__':
         detector_backend=args.detector,
         volume=args.volume,
         eye_display_type=args.eye_display,
-        eye_dc_pin=robot_config.get('eye_dc_pin', 24),
-        eye_rst_pin=robot_config.get('eye_rst_pin', 25),
-        eye_cs_pin=robot_config.get('eye_cs_pin', 0),
-        eye_spi_port=robot_config.get('eye_spi_port', 0),
-        eye_brightness=robot_config.get('eye_brightness', 15),
-        eye_rotation=robot_config.get('eye_rotation', 0),
-        eye_offset_x=robot_config.get('eye_offset_x', 0),
-        eye_offset_y=robot_config.get('eye_offset_y', 0),
+        eye_dc_pin=_cfg_int(robot_config, 'eye_dc_pin', 24),
+        eye_rst_pin=_cfg_int(robot_config, 'eye_rst_pin', 25),
+        eye_cs_pin=_cfg_int(robot_config, 'eye_cs_pin', 0),
+        eye_spi_port=_cfg_int(robot_config, 'eye_spi_port', 0),
+        eye_brightness=_cfg_int(robot_config, 'eye_brightness', 15),
+        eye_rotation=_cfg_int(robot_config, 'eye_rotation', 0),
+        eye_offset_x=_cfg_int(robot_config, 'eye_offset_x', 0),
+        eye_offset_y=_cfg_int(robot_config, 'eye_offset_y', 0),
     )
 
     # Start processing thread
@@ -2132,6 +2258,10 @@ if __name__ == '__main__':
     # Start MJPEG encoder thread (encodes once, shared by all clients)
     encoder_thread = threading.Thread(target=mjpeg_encoder_loop, daemon=True)
     encoder_thread.start()
+
+    # Start Bluetooth poll thread (keeps /api/bluetooth non-blocking)
+    bt_thread = threading.Thread(target=bt_poll_loop, daemon=True)
+    bt_thread.start()
 
     # Register signal handlers for graceful shutdown
     def signal_handler(sig, frame):
