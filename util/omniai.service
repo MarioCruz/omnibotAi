@@ -1,0 +1,31 @@
+[Unit]
+Description=OmniBot AI Dashboard
+After=network-online.target bluetooth.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=admin
+Group=admin
+WorkingDirectory=/home/admin/omniai
+ExecStart=/home/admin/omniai/util/start.sh
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+# Graceful shutdown — dashboard handles SIGTERM via signal_handler
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=omniai
+
+Environment=PYTHONUNBUFFERED=1
+
+# Supplementary groups needed for camera, audio, bluetooth, gpio/spi
+SupplementaryGroups=video audio bluetooth gpio spi i2c
+
+[Install]
+WantedBy=multi-user.target

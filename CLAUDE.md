@@ -590,6 +590,48 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclud
 ~/omniai/util/start.sh --volume 0.7 --port 8080
 ```
 
+`start.sh` runs `util/smoke_test.py` before launching the dashboard. If
+imports, camera, or audio fail, the script exits non-zero and the dashboard
+is not started — preventing systemd from flapping a broken build.
+
+### Running as a systemd service
+```bash
+# On the Pi, one-time install:
+~/omniai/util/install_service.sh
+
+# Thereafter:
+sudo systemctl status omniai
+sudo systemctl restart omniai
+journalctl -u omniai -f            # live logs
+journalctl -u omniai --since '10 min ago'
+```
+
+The unit (`util/omniai.service`) sets `Restart=on-failure` with a 5-second
+backoff and a 5-crash-in-2-minutes rate limit. stdout/stderr go to journald
+(rotation handled automatically). The dashboard itself calls `os._exit(1)`
+when the camera is stale for 60+ seconds so systemd restarts cleanly.
+
+### Health checks
+`GET /healthz` returns a JSON snapshot:
+```json
+{
+  "status": "ok",
+  "reasons": [],
+  "subsystems": {
+    "camera": {"age_seconds": 0.12, "fps": 29, "stale": false},
+    "robot": {"connected": true},
+    "eye": {"alive": true},
+    "process": {"uptime_seconds": 1234.5, "running": true, ...},
+    "detection": {"last_ago_seconds": 0.5}
+  }
+}
+```
+Returns `503` when any subsystem is degraded. `/health` is an alias.
+
+### Logs
+`logs/task.log` rotates at 5MB with 3 backups (RotatingFileHandler).
+stdout prints under systemd go to journald, which has its own rotation.
+
 ## Security Notes
 - `speak()` sanitizes input with regex: `[^a-zA-Z0-9\s.,!?'-]` removed
 - `espeak` called with `--` to prevent option injection
