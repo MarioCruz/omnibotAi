@@ -22,7 +22,15 @@ else
     source venv/bin/activate
 fi
 
+# Pre-launch smoke test — aborts startup if imports or hardware are broken
+# so systemd doesn't flap a half-working dashboard in a restart loop.
+echo "[Smoke] Running pre-launch checks..."
+if ! python3 util/smoke_test.py; then
+    echo "[Smoke] FAILED — not launching dashboard. See output above."
+    exit 1
+fi
+
 # Start the dashboard (uses rule-based navigation — no LLM needed)
 echo "[Navigation] Rule-based (no LLM required)"
 echo "[Start] Launching dashboard on port 8080..."
-python3 dashboard.py "$@"
+exec python3 dashboard.py "$@"
