@@ -36,12 +36,16 @@ LABEL_ALIASES = {
 class NavigationEngine:
     """Generate robot movement commands from object detections using position math."""
 
-    # Robot commands (same format as RobotCommandExecutor expects)
+    # Robot commands (same format as RobotCommandExecutor expects).
+    # step(...) is a full-size move (~90° turn), nudge(...) is a fine-adjust
+    # turn (~30°) so the robot doesn't overshoot when almost lined up.
     COMMANDS = {
         'forward': 'step("forward")',
         'backward': 'step("backward")',
         'left': 'step("left")',
         'right': 'step("right")',
+        'nudge_left': 'nudge("left")',
+        'nudge_right': 'nudge("right")',
         'stop': 'step("stop")',
     }
 
@@ -152,19 +156,31 @@ class NavigationEngine:
         bbox = target['bbox']
         obj_center_x = bbox['x'] + bbox['width'] / 2
         frame_center_x = self.frame_width / 2
+        delta = obj_center_x - frame_center_x  # negative=left, positive=right
 
-        # 15% dead zone in the center to avoid jittering
-        threshold = self.frame_width * 0.15
+        # 15% dead zone — below this we go forward without turning.
+        # 35% is the "far" threshold — above this we do a full ~90° turn;
+        # between 15% and 35% we nudge (~30°) so we don't overshoot when
+        # nearly lined up and oscillate left-right-left-right.
+        near_threshold = self.frame_width * 0.15
+        far_threshold = self.frame_width * 0.35
+        abs_delta = abs(delta)
 
-        if obj_center_x < frame_center_x - threshold:
-            # Target is left — turn to face it
-            commands.append(self.COMMANDS['left'])
-            log.append(f"{label} at x:{bbox['x']} -> LEFT of center -> turn left")
+        if delta < -near_threshold:
+            if abs_delta > far_threshold:
+                commands.append(self.COMMANDS['left'])
+                log.append(f"{label} at x:{bbox['x']} -> FAR LEFT -> full turn left")
+            else:
+                commands.append(self.COMMANDS['nudge_left'])
+                log.append(f"{label} at x:{bbox['x']} -> slightly LEFT -> nudge left")
 
-        elif obj_center_x > frame_center_x + threshold:
-            # Target is right — turn to face it
-            commands.append(self.COMMANDS['right'])
-            log.append(f"{label} at x:{bbox['x']} -> RIGHT of center -> turn right")
+        elif delta > near_threshold:
+            if abs_delta > far_threshold:
+                commands.append(self.COMMANDS['right'])
+                log.append(f"{label} at x:{bbox['x']} -> FAR RIGHT -> full turn right")
+            else:
+                commands.append(self.COMMANDS['nudge_right'])
+                log.append(f"{label} at x:{bbox['x']} -> slightly RIGHT -> nudge right")
 
         else:
             # Target is centered — approach or use specific rule

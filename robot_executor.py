@@ -54,7 +54,10 @@ class RobotCommandExecutor:
 
         # Movement durations (ms)
         self.step_duration = 500
-        self.turn_duration = 750  # Short turn for course correction (was 3000 = 90°)
+        self.turn_duration = 750  # Short turn for course correction (~90°)
+        # Fine-adjust turn for lining up with a target without overshooting.
+        # ~40% of turn_duration = ~30-35° per nudge.
+        self.nudge_duration = 300
 
         # Pattern definitions
         self.patterns = {
@@ -189,6 +192,20 @@ class RobotCommandExecutor:
             elif cmd_lower.startswith('step('):
                 direction = command[5:-1].strip('"\'')
                 return self.execute(direction)
+
+            # Nudge commands — same direction semantics as step(), but a
+            # shorter turn duration so nav can fine-align without overshooting.
+            # step("left")  -> ~90° turn   (turn_duration)
+            # nudge("left") -> ~30° turn   (nudge_duration)
+            elif cmd_lower.startswith('nudge('):
+                direction = cmd_lower[6:-1].strip('"\'')
+                if direction == 'left':
+                    self.audio.left(self.nudge_duration)
+                    return CommandResult(True, "Nudge left")
+                elif direction == 'right':
+                    self.audio.right(self.nudge_duration)
+                    return CommandResult(True, "Nudge right")
+                return CommandResult(False, f"Invalid nudge direction: {direction}")
 
             # Run pattern commands
             elif cmd_lower.startswith('runpattern('):
