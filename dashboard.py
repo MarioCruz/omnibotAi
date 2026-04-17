@@ -1963,14 +1963,33 @@ def api_command():
             eye_display.set_expression(EyeDisplay.EXPR_NORMAL)
 
     if robot and robot.connected:
-        # Special handling for speaker_off - kills speech and sends speaker off tone
+        # Special handling for speaker_off - kills speech and sends speaker off tone.
+        # Stays synchronous because it must preempt any running speech immediately.
         if cmd == 'speaker_off':
             if robot.audio:
                 robot.audio.stop_speaking()
                 return jsonify({'status': 'ok', 'result': True, 'message': 'Speaker off sent'})
             return jsonify({'status': 'error', 'message': 'Audio not available'})
-        result = robot.execute(cmd)
-        return jsonify({'status': 'ok', 'result': result.success})
+
+        # Dispatch asynchronously under executing_lock so the Flask request
+        # doesn't block on long-running commands (patterns ~5-10s, speech up
+        # to 30s) and doesn't race with autonomous nav from process_loop.
+        global is_executing
+        with executing_lock:
+            if is_executing:
+                return jsonify({'status': 'busy', 'message': 'Robot executing another command'}), 409
+            is_executing = True
+
+        def _run_manual(c):
+            global is_executing
+            try:
+                robot.execute(c)
+            finally:
+                with executing_lock:
+                    is_executing = False
+
+        threading.Thread(target=_run_manual, args=(cmd,), daemon=True).start()
+        return jsonify({'status': 'queued', 'command': cmd})
     return jsonify({'status': 'error', 'message': 'Robot not connected'})
 
 

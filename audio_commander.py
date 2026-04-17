@@ -10,7 +10,30 @@ import subprocess
 import tempfile
 import wave
 import os
+import signal
 import threading
+
+
+def _kill_process_group(proc, sig=signal.SIGTERM):
+    """Kill a Popen started with start_new_session=True and all its descendants.
+
+    speak_pi.sh / speak_phrase.sh spawn sox, pw-play, and espeak-ng as children.
+    Calling proc.kill() only SIGKILLs the bash wrapper, leaving the children
+    running and holding the audio device. killpg on the process group cleans
+    them all up at once.
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+    except Exception:
+        # Last-resort fallback — better to SIGKILL the parent than leak.
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 try:
     import sounddevice as sd
@@ -288,10 +311,15 @@ class AudioCommander:
             self._espeak_proc = None
             self._pw_proc = None
 
-        # Kill outside lock to avoid deadlock
+        # Kill outside lock to avoid deadlock.
+        # espeak was started with start_new_session=True, so target the whole
+        # process group to cleanly reap sox/pw-play/espeak-ng descendants.
         if espeak:
+            _kill_process_group(espeak, signal.SIGTERM)
             try:
-                espeak.kill()
+                espeak.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                _kill_process_group(espeak, signal.SIGKILL)
             except Exception:
                 pass
         if pw:
@@ -370,7 +398,8 @@ class AudioCommander:
                 self._espeak_proc = subprocess.Popen(
                     ['bash', script_path, sanitized],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,  # isolate process group for clean kill
                 )
                 proc = self._espeak_proc
 
@@ -380,7 +409,11 @@ class AudioCommander:
                     proc.wait(timeout=30)
                 except subprocess.TimeoutExpired:
                     print("[AudioCommander] speak script timed out")
-                    proc.kill()
+                    _kill_process_group(proc, signal.SIGTERM)
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        _kill_process_group(proc, signal.SIGKILL)
 
             # Only clear if our proc is still the tracked one — avoids racing
             # with another speak() call that already replaced the reference.
@@ -420,7 +453,8 @@ class AudioCommander:
                 self._espeak_proc = subprocess.Popen(
                     ['bash', script_path, phrase],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,  # isolate process group for clean kill
                 )
                 proc = self._espeak_proc
 
@@ -430,7 +464,11 @@ class AudioCommander:
                     proc.wait(timeout=15)
                 except subprocess.TimeoutExpired:
                     print("[AudioCommander] speak_phrase timed out")
-                    proc.kill()
+                    _kill_process_group(proc, signal.SIGTERM)
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        _kill_process_group(proc, signal.SIGKILL)
 
             # Only clear if our proc is still the tracked one — avoids racing
             # with another speak() call that already replaced the reference.
