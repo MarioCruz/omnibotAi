@@ -465,14 +465,18 @@ reloads systemd, enables it at boot, and starts it. The unit sets
 rate limit. The dashboard itself calls `os._exit(1)` when the camera is
 stale for 60+ seconds, so systemd restarts it cleanly.
 
-Day-to-day commands:
+Day-to-day commands — use the `util/service.sh` wrapper:
 
 ```bash
-sudo systemctl status omniai
-sudo systemctl restart omniai
-journalctl -u omniai -f                # live logs
-journalctl -u omniai --since '10 min ago'
+~/omniai/util/service.sh status      # systemctl status
+~/omniai/util/service.sh restart     # restart after a pull
+~/omniai/util/service.sh stop        # stop the dashboard
+~/omniai/util/service.sh start       # start it again
+~/omniai/util/service.sh tail        # journalctl -f (live logs)
+~/omniai/util/service.sh logs        # last 10 min of logs
 ```
+
+Or call `systemctl` / `journalctl` directly if you prefer.
 
 stdout/stderr go to journald (rotation handled automatically). The task
 log at `logs/task.log` rotates at 5MB with 3 backups.
