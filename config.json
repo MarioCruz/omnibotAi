@@ -6,8 +6,8 @@
   "eye_cs_pin": 0,
   "eye_brightness": 10,
   "eye_rotation": 90,
-  "eye_offset_x": 11,
-  "eye_offset_y": 0,
+  "eye_offset_x": 3,
+  "eye_offset_y": -3,
 
   "detector": "imx500",
   "volume": 0.5,
