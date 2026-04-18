@@ -16,6 +16,11 @@ mkdir -p "$PHRASE_DIR"
 
 # name|spoken text
 PHRASES=(
+    "hello|Hello"
+    "yes|Yes"
+    "no|No"
+    "thanks|Thank you"
+    "omnibot|Hello, I am Omnibot"
     "ready|Ready to go"
     "goodbye|Goodbye"
     "found_it|I found it"
