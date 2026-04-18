@@ -56,6 +56,9 @@ models/
 # Blog drafts (personal use only)
 blog-draft*
 
+# Personal drafts / scratch (blog posts, magazine drafts) — keep local only
+temp/
+
 # Personal deploy scripts (user-specific host/paths, not for repo)
 deploy-my-*.sh
 
