@@ -1,5 +1,7 @@
 # OmniAI - Raspberry Pi AI Robot Control System
 
+![Omnibot Ring-O](docs/images/omnibot-ringo-hero.jpg)
+
 AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLO11 hardware-accelerated detection**, rule-based navigation, and real-time object detection.
 
 ## Features
@@ -227,6 +229,9 @@ python util/test_eye_display.py
 - **Offsets**: left=2, top=1
 
 ### Expressions
+
+![Eye expressions](docs/images/ring-o-eye-expressions.gif)
+
 | Expression | Description |
 |------------|-------------|
 | `normal` | Default relaxed eye |
@@ -235,6 +240,8 @@ python util/test_eye_display.py
 | `sleepy` | Half-closed eyelids |
 | `angry` | Angled eyebrow |
 | `look_left/right/up/down` | Pupil tracking |
+
+Regenerate the GIF with `python3 util/render_eye_gif.py` (runs headless; no Pi required).
 
 ### Testing Expressions
 
