@@ -445,6 +445,45 @@ rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' \
 ~/omniai/util/start.sh --volume 0.7 --port 8080
 ```
 
+`start.sh` runs `util/smoke_test.py` first — if imports, camera, or audio
+fail, it exits non-zero and the dashboard never launches, so a broken build
+doesn't flap systemd.
+
+### Running as a systemd service
+
+For auto-start on boot and automatic restart on crash, install the
+`omniai.service` unit:
+
+```bash
+# One-time install on the Pi
+~/omniai/util/install_service.sh
+```
+
+The installer copies `util/omniai.service` to `/etc/systemd/system/`,
+reloads systemd, enables it at boot, and starts it. The unit sets
+`Restart=on-failure` with a 5-second backoff and a 5-crash-in-2-minutes
+rate limit. The dashboard itself calls `os._exit(1)` when the camera is
+stale for 60+ seconds, so systemd restarts it cleanly.
+
+Day-to-day commands:
+
+```bash
+sudo systemctl status omniai
+sudo systemctl restart omniai
+journalctl -u omniai -f                # live logs
+journalctl -u omniai --since '10 min ago'
+```
+
+stdout/stderr go to journald (rotation handled automatically). The task
+log at `logs/task.log` rotates at 5MB with 3 backups.
+
+### Health checks
+
+`GET /healthz` (alias: `/health`) returns a JSON snapshot of camera FPS,
+robot connection, eye animation, process uptime, and time since last
+detection. It returns `503` when any subsystem is degraded, which makes
+it easy to wire into external monitoring.
+
 ## Future: Custom Model Training
 
 Currently using pre-trained YOLO11 with 80 COCO classes. The IMX500 ecosystem supports training custom models to recognize specific objects (e.g., "Mario's shoes" instead of generic "shoes").
