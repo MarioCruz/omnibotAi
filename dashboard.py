@@ -115,6 +115,7 @@ system_state = {
     'paused': False,
     'shutdown': False,  # Flag for graceful shutdown
     'task': None,  # No task by default - must select a mission to enable autonomous mode
+    'arrived_announced': False,  # True once we've spoken "found it" for the current task
     'detections': [],
     'last_commands': [],
     'stats': {
@@ -372,6 +373,12 @@ def process_loop():
 
                 if claimed:
                     commands = nav.generate_commands(detections, context=system_state['task'])
+
+                    # Announce arrival once per task when nav decides we're close enough.
+                    if 'step("stop")' in commands and not system_state['arrived_announced']:
+                        commands.append('phrase("found_it")')
+                        system_state['arrived_announced'] = True
+                        task_logger.info("ARRIVED — announcing found_it")
 
                     debug = nav.last_debug
                     task_logger.info(
@@ -780,6 +787,12 @@ DASHBOARD_HTML = """
                     <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('no')">No</button>
                     <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('thanks')">Thanks</button>
                     <button class="btn-cmd" style="background:#ff4444;" onclick="sendCommand('speaker_off')">🔇 Speaker Off</button>
+                </div>
+                <div class="controls" style="grid-template-columns: repeat(4, 1fr); margin-top: 8px;">
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('ready')">Ready</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('goodbye')">Goodbye</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('sorry')">Sorry</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('okay')">Okay</button>
                 </div>
             </div>
         </div>
@@ -1700,6 +1713,26 @@ KIDS_DASHBOARD_HTML = """
             </button>
         </div>
 
+        <div class="section-label">// SAY IT //</div>
+        <div class="missions">
+            <button class="arcade-btn yellow" onclick="sayPhrase('ready')">
+                <span class="icon">🚀</span>
+                <span>Ready!</span>
+            </button>
+            <button class="arcade-btn pink" onclick="sayPhrase('goodbye')">
+                <span class="icon">👋</span>
+                <span>Goodbye</span>
+            </button>
+            <button class="arcade-btn cyan" onclick="sayPhrase('sorry')">
+                <span class="icon">😅</span>
+                <span>Sorry</span>
+            </button>
+            <button class="arcade-btn green" onclick="sayPhrase('okay')">
+                <span class="icon">👍</span>
+                <span>Okay</span>
+            </button>
+        </div>
+
         <div class="section-label">// MANUAL CONTROL //</div>
         <div class="dpad-container">
             <div class="dpad">
@@ -1863,6 +1896,10 @@ KIDS_DASHBOARD_HTML = """
             kidCommand('phrase("omnibot")', 'VOICE OUTPUT');
         }
 
+        function sayPhrase(name) {
+            kidCommand('phrase("' + name + '")', 'SAYING: ' + name.toUpperCase());
+        }
+
         function speakerOff() {
             kidCommand('speaker_off', 'SPEAKER OFF');
         }
@@ -1960,6 +1997,7 @@ def api_stop():
     if system_state['task']:
         task_logger.info(f"=== TASK STOPPED: {system_state['task']} ===")
     system_state['task'] = None  # Clear task to stop autonomous commands
+    system_state['arrived_announced'] = False
     if robot:
         robot.stop()
     return jsonify({'status': 'stopped'})
@@ -1982,6 +2020,7 @@ def api_task():
     if not cleaned:
         return jsonify({'status': 'error', 'message': 'task is empty after sanitization'}), 400
     system_state['task'] = cleaned
+    system_state['arrived_announced'] = False
     task_logger.info(f"=== TASK SET: {cleaned} ===")
     return jsonify({'status': 'ok', 'task': cleaned})
 
@@ -1992,6 +2031,7 @@ def api_task_end():
     if system_state['task']:
         task_logger.info(f"=== TASK ENDED: {system_state['task']} ===")
     system_state['task'] = None
+    system_state['arrived_announced'] = False
     return jsonify({'status': 'ok', 'task': None})
 
 
