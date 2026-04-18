@@ -76,6 +76,15 @@ python test_detection.py
 python dashboard.py --port 8080
 ```
 
+Then open in a browser on the same network:
+
+- Main dashboard: **https://omniai.local:8080/**
+- Kids dashboard: **https://omniai.local:8080/kids**
+
+`omniai.local` is the Pi's mDNS/Bonjour name (the hostname set during Pi OS
+setup). If it doesn't resolve, use the Pi's IP from `hostname -I`. Accept
+the self-signed TLS warning on first load.
+
 ## IMX500 AI Camera
 
 The IMX500 is a **smart camera** with an on-chip neural network accelerator. Key points:
