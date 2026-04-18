@@ -33,7 +33,11 @@ sudo apt update && sudo apt full-upgrade -y
 sudo apt install imx500-all -y
 
 # Install system dependencies
-sudo apt install -y libcap-dev python3-dev python3-venv libportaudio2 portaudio19-dev
+# - libcap/python/portaudio: build deps for Python bindings
+# - sox + pipewire: audio tone generation and playback via pw-play
+# - espeak-ng: text-to-speech for the robot voice
+sudo apt install -y libcap-dev python3-dev python3-venv libportaudio2 portaudio19-dev \
+    sox pipewire pipewire-audio-client-libraries espeak-ng
 
 # Reboot
 sudo reboot
@@ -57,8 +61,12 @@ cd ~/omniai
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
 
-# Install dependencies
-pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice
+# Install Python dependencies
+# - pillow: PIL image buffers for the OLED eye rendering
+# - st7735 + gpiodevice: drivers for the ST7735S TFT eye display
+# - luma.oled: driver for the SSD1351 OLED eye display (optional — pick one)
+pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio \
+    opencv-python sounddevice pillow st7735 gpiodevice luma.oled
 
 # Optional: Set up Groq API key (for future LLM features like scene description)
 # echo "GROQ_API_KEY=your_api_key_here" > .env

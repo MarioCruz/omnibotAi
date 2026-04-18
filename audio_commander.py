@@ -429,15 +429,19 @@ class AudioCommander:
         except Exception as e:
             print(f"[AudioCommander] speak error: {e}")
 
-    # Valid pre-recorded phrase names
-    VALID_PHRASES = {'hello', 'yes', 'no', 'thanks', 'omnibot'}
+    # Valid pre-recorded phrase names — must match util/generate_phrases.sh
+    VALID_PHRASES = {
+        'hello', 'yes', 'no', 'thanks', 'omnibot',
+        'ready', 'goodbye', 'found_it', 'oops', 'sorry', 'okay',
+    }
 
     def speak_phrase(self, phrase: str):
         """
         Play a pre-recorded phrase (faster than generating speech).
 
         Args:
-            phrase: Phrase name (hello, yes, no, thanks, omnibot)
+            phrase: Phrase name. See VALID_PHRASES for the full list; source
+                    of truth is util/generate_phrases.sh.
         """
         # Validate against whitelist to prevent injection
         if phrase not in self.VALID_PHRASES:
