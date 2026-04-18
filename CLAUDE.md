@@ -147,14 +147,14 @@ while True:
 
 ### Available IMX500 Models
 
-**Object Detection (recommended: YOLO11):**
+**Object Detection (YOLO-family only — the bbox parser assumes xy ordering):**
 | Model | File | Notes |
 |-------|------|-------|
 | **YOLO11 nano** | `imx500_network_yolo11n_pp.rpk` | Best accuracy, 640x640 input |
 | YOLOv8 nano | `imx500_network_yolov8n_pp.rpk` | Previous default, 640x640 input |
-| SSD MobileNetV2 | `imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk` | Fastest, 320x320 input |
-| NanoDet Plus | `imx500_network_nanodet_plus_416x416_pp.rpk` | Balanced, needs postprocess |
-| EfficientDet Lite-0 | `imx500_network_efficientdet_lite0_pp.rpk` | Good accuracy |
+
+SSD MobileNet / NanoDet / EfficientDet (yx-ordered) are NOT supported.
+`_detect_imx500()` hardcodes xy ordering and would mis-project their boxes.
 
 **YOLO11 is included in the imx500-models package (no manual download needed).**
 
@@ -380,10 +380,10 @@ from object_detector import ObjectDetector
 # Uses YOLO11 by default for best accuracy
 detector = ObjectDetector(backend='imx500')
 
-# Or specify a different model
+# Or pin a specific YOLO variant (YOLO family only — see supported models above)
 detector = ObjectDetector(
     backend='imx500',
-    model_path='/usr/share/imx500-models/imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk',
+    model_path='/usr/share/imx500-models/imx500_network_yolov8n_pp.rpk',
     confidence_threshold=0.3
 )
 

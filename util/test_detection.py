@@ -19,11 +19,9 @@ from picamera2 import MappedArray, Picamera2
 from picamera2.devices import IMX500
 from picamera2.devices.imx500 import NetworkIntrinsics, postprocess_nanodet_detection
 
-# Configuration - Choose model:
-# MobileNet SSD (fast): imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk
-# YOLOv8 nano (accurate): imx500_network_yolov8n_pp.rpk
-# YOLO11 nano (latest): imx500_network_yolo11n_pp.rpk
-# NanoDet Plus: imx500_network_nanodet_plus_416x416_pp.rpk
+# Supported models (YOLO family only — bbox parser assumes xy ordering):
+#   YOLO11 nano (default): imx500_network_yolo11n_pp.rpk
+#   YOLOv8 nano:           imx500_network_yolov8n_pp.rpk
 MODEL_PATH = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 CONFIDENCE_THRESHOLD = 0.3
 IOU_THRESHOLD = 0.65

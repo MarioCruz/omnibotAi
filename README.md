@@ -155,13 +155,15 @@ omniai/
 
 ## Detection Models
 
+Only YOLO-family models are supported and tested. The bbox parser in
+`object_detector.py` assumes `xy` coordinate ordering; yx-ordered models
+(SSD MobileNet, NanoDet Plus, EfficientDet Lite) are not wired up and
+would produce misprojected boxes if swapped in.
+
 | Model | File | Input | Speed | Accuracy |
 |-------|------|-------|-------|----------|
 | **YOLO11 nano** | `imx500_network_yolo11n_pp.rpk` | 640x640 | Good | **Best** |
 | YOLOv8 nano | `imx500_network_yolov8n_pp.rpk` | 640x640 | Good | Good |
-| MobileNet SSD | `imx500_network_ssd_mobilenetv2_fpnlite_320x320_pp.rpk` | 320x320 | **Fastest** | Good |
-| NanoDet Plus | `imx500_network_nanodet_plus_416x416_pp.rpk` | 416x416 | Good | Good |
-| EfficientDet | `imx500_network_efficientdet_lite0_pp.rpk` | Various | Medium | Good |
 
 ## Tomy Omnibot Audio Control
 
