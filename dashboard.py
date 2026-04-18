@@ -599,14 +599,20 @@ DASHBOARD_HTML = """
         }
         .controls button {
             padding: 12px;
+            min-height: 48px;              /* touch target: Apple HIG minimum 44pt */
             border: none;
             border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;    /* remove 300ms tap delay */
         }
         .controls button:hover { transform: scale(1.02); }
+        .controls button:active { transform: scale(0.97); opacity: 0.85; }
         .btn-start { background: #00ff88; color: #000; }
         .btn-stop { background: #ff4444; color: #fff; }
         .btn-pause { background: #ffaa00; color: #000; }
@@ -1286,6 +1292,7 @@ KIDS_DASHBOARD_HTML = """
         }
         .arcade-btn {
             padding: 15px 10px;
+            min-height: 56px;
             border: none;
             border-radius: 8px;
             font-family: 'Press Start 2P', monospace;
@@ -1298,6 +1305,10 @@ KIDS_DASHBOARD_HTML = """
             gap: 8px;
             position: relative;
             text-transform: uppercase;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
 
             /* 3D button effect */
             background: linear-gradient(180deg, #666 0%, #444 50%, #333 100%);
@@ -1456,6 +1467,10 @@ KIDS_DASHBOARD_HTML = """
             color: var(--neon-cyan);
             text-shadow: 0 0 10px var(--neon-cyan);
             transition: all 0.05s;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         .dpad-btn:hover {
             background: linear-gradient(180deg, #666 0%, #444 50%, #333 100%);
