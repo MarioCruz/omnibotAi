@@ -183,6 +183,18 @@ Pre-generated WAV files for instant playback:
 | `no` | "No" negative |
 | `thanks` | "Thank you" |
 | `omnibot` | "Hello, I am Omnibot" intro |
+| `ready` | "Ready to go" |
+| `goodbye` | "Goodbye" |
+| `found_it` | "I found it" |
+| `oops` | "Oops" |
+| `sorry` | "Sorry" |
+| `okay` | "Okay" |
+
+To regenerate missing phrase WAVs on the Pi:
+```bash
+~/omniai/util/generate_phrases.sh   # uses espeak-ng -a 200, skips existing files
+git add audio_phrases/*.wav && git commit -m 'Add phrase WAVs'
+```
 
 ### Text-to-Speech (Flexible)
 Any text can be spoken via espeak-ng (slower than pre-recorded).

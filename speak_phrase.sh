@@ -1,7 +1,7 @@
 #!/bin/bash
 # Play a pre-recorded phrase WAV file with speaker on/off tones
 # Usage: ./speak_phrase.sh <phrase_name>
-# Phrases: hello, yes, no, thanks, omnibot
+# Phrases: hello, yes, no, thanks, omnibot, ready, goodbye, found_it, oops, sorry, okay
 
 SPKON_FREQ=1422
 SPKOFF_FREQ=4650
@@ -14,7 +14,7 @@ PHRASE_DIR="$SCRIPT_DIR/audio_phrases"
 
 if [ -z "$1" ]; then
     echo "Usage: ./speak_phrase.sh <phrase_name>"
-    echo "Available: hello, yes, no, thanks, omnibot"
+    echo "Available: hello, yes, no, thanks, omnibot, ready, goodbye, found_it, oops, sorry, okay"
     exit 1
 fi
 
