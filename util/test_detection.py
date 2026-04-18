@@ -28,6 +28,8 @@ MODEL_PATH = '/usr/share/imx500-models/imx500_network_yolo11n_pp.rpk'
 CONFIDENCE_THRESHOLD = 0.3
 IOU_THRESHOLD = 0.65
 MAX_DETECTIONS = 10
+FRAME_WIDTH = 640
+FRAME_HEIGHT = 480
 
 # COCO labels
 LABELS = [
@@ -69,12 +71,11 @@ app = Flask(__name__)
 
 
 class Detection:
-    """Detection result with bounding box, category, and confidence."""
-    def __init__(self, coords, category, conf, metadata):
+    """Detection result with bounding box (x, y, w, h), category, and confidence."""
+    def __init__(self, box_xywh, category, conf):
         self.category = category
         self.conf = conf
-        # Convert inference coordinates to ISP output coordinates
-        self.box = imx500.convert_inference_coords(coords, metadata, picam2)
+        self.box = box_xywh  # (x, y, w, h) in frame coords
 
 
 @lru_cache
@@ -87,7 +88,14 @@ def get_labels():
 
 
 def parse_detections(metadata):
-    """Parse the output tensor into detected objects, scaled to ISP output."""
+    """Parse the output tensor into detected objects, scaled to ISP output.
+
+    Mirrors object_detector.py's bbox pipeline: manual letterbox compensation
+    (ISP pads top/bottom to square the frame), auto-detected normalization,
+    and bounds clamping. `imx500.convert_inference_coords()` was found to
+    produce misaligned boxes for YOLO _pp models on 640×480 frames, so we
+    compute frame coords ourselves.
+    """
     global last_detections
 
     np_outputs = imx500.get_outputs(metadata, add_batch=True)
@@ -95,6 +103,7 @@ def parse_detections(metadata):
         return last_detections
 
     input_w, input_h = imx500.get_input_size()
+    frame_w, frame_h = FRAME_WIDTH, FRAME_HEIGHT
 
     # Check if using nanodet postprocessing
     if intrinsics and intrinsics.postprocess == "nanodet":
@@ -107,27 +116,49 @@ def parse_detections(metadata):
         from picamera2.devices.imx500.postprocess import scale_boxes
         boxes = scale_boxes(boxes, 1, 1, input_h, input_w, False, False)
     else:
-        # Standard SSD output format
         boxes, scores, classes = np_outputs[0][0], np_outputs[1][0], np_outputs[2][0]
 
-        # Handle bbox normalization
-        bbox_normalization = intrinsics.bbox_normalization if intrinsics else True
-        if bbox_normalization:
-            boxes = boxes / input_h
+    # Auto-detect normalization by inspecting actual values
+    box_max = float(boxes.max()) if len(boxes) > 0 else 0
+    if box_max > 2.0:
+        boxes = boxes / input_h
 
-        # Handle bbox order (xy vs yx)
-        bbox_order = intrinsics.bbox_order if intrinsics else "yx"
-        if bbox_order == "xy":
-            boxes = boxes[:, [1, 0, 3, 2]]
+    # Letterbox compensation: ISP pads top/bottom to square the frame
+    pad_y = (input_h - frame_h * input_w / frame_w) / 2.0 if frame_w > 0 else 0
+    scale = input_w / frame_w  # horizontal scale (no padding on x)
 
-        boxes = np.array_split(boxes, 4, axis=1)
-        boxes = zip(*boxes)
+    results = []
+    for box, score, category in zip(boxes, scores, classes):
+        if score < CONFIDENCE_THRESHOLD:
+            continue
 
-    last_detections = [
-        Detection(box, category, score, metadata)
-        for box, score, category in zip(boxes, scores, classes)
-        if score > CONFIDENCE_THRESHOLD
-    ]
+        coords = box.flatten() if hasattr(box, 'flatten') else list(box)
+        nx1, ny1, nx2, ny2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
+
+        # Model space (square) -> frame space (may be non-square)
+        x1 = nx1 * input_w / scale
+        x2 = nx2 * input_w / scale
+        y1 = (ny1 * input_h - pad_y) / scale
+        y2 = (ny2 * input_h - pad_y) / scale
+
+        # Clamp, swap if inverted
+        x1 = max(0, min(frame_w, x1))
+        x2 = max(0, min(frame_w, x2))
+        y1 = max(0, min(frame_h, y1))
+        y2 = max(0, min(frame_h, y2))
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if y1 > y2:
+            y1, y2 = y2, y1
+
+        bw = int(x2 - x1)
+        bh = int(y2 - y1)
+        if bw <= 0 or bh <= 0:
+            continue
+
+        results.append(Detection((int(x1), int(y1), bw, bh), category, score))
+
+    last_detections = results
     return last_detections
 
 
@@ -489,7 +520,7 @@ def main():
     print("Starting camera...")
     picam2 = Picamera2(imx500.camera_num)
     config = picam2.create_preview_configuration(
-        main={"format": 'RGB888', "size": (640, 480)},
+        main={"format": 'RGB888', "size": (FRAME_WIDTH, FRAME_HEIGHT)},
         controls={"FrameRate": intrinsics.inference_rate},
         buffer_count=12
     )
