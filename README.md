@@ -190,10 +190,20 @@ Pre-generated WAV files for instant playback:
 | `sorry` | "Sorry" |
 | `okay` | "Okay" |
 
-To regenerate missing phrase WAVs on the Pi:
+`util/generate_phrases.sh` is the source of truth for every phrase in the
+table above. Run it on the Pi to generate any WAVs that are missing:
+
 ```bash
 ~/omniai/util/generate_phrases.sh   # uses espeak-ng -a 200, skips existing files
 git add audio_phrases/*.wav && git commit -m 'Add phrase WAVs'
+```
+
+To regenerate a specific phrase (e.g. to change the voice or wording), delete
+its WAV first and re-run:
+
+```bash
+rm audio_phrases/hello.wav
+~/omniai/util/generate_phrases.sh
 ```
 
 ### Text-to-Speech (Flexible)
