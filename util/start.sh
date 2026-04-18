@@ -17,7 +17,7 @@ if [ ! -d "venv" ]; then
     python3 -m venv venv --system-site-packages
     source venv/bin/activate
     pip install flask flask-cors flask-socketio requests ollama websocket-client \
-        python-socketio opencv-python sounddevice st7735 gpiodevice
+        python-socketio opencv-python sounddevice pillow st7735 gpiodevice luma.oled
 else
     source venv/bin/activate
 fi
