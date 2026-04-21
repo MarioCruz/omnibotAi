@@ -73,18 +73,60 @@ pip install flask flask-cors flask-socketio requests ollama websocket-client pyt
 # Navigation uses rule-based math — no LLM needed
 ```
 
-### 4. Run
+### 4. Getting Started
+
+Three quick checkpoints that go from "did the install work?" to "the robot is
+driving itself." Run them in order — if step 1 fails, skip 2 and 3 until you
+fix the underlying issue.
+
+#### Step 1 — Smoke test (does everything import & boot?)
 
 ```bash
-# Test detection standalone (recommended first)
-python test_detection.py
-# Open https://omniai.local:8080
-
-# Full dashboard with navigation and robot control
-python dashboard.py --port 8080
+python3 util/smoke_test.py
 ```
 
-Then open in a browser on the same network:
+Verifies pure imports, hardware imports, `config.json` parses, the camera
+captures one frame, and `sox`/`pw-play` connect to PipeWire. Exits non-zero
+if anything's broken so a bad deploy doesn't flap systemd. Pass `--skip-hardware`
+on a dev machine without a Pi.
+
+#### Step 2 — Camera + AI sanity test (is the AI actually seeing things?)
+
+```bash
+python3 util/test_camera_ai.py --seconds 10
+```
+
+Runs the production camera + IMX500 detector for 10 seconds and prints every
+detection to stdout. No browser, no Flask — just terminal output:
+
+```
+=== OmniBot camera + AI sanity test ===
+Running for 10s, confidence >= 30%
+
+  person       87%  bbox=(225,118,420x460)
+  laptop       73%  bbox=(355,290,225x150)
+  person       85%  bbox=(232,120,418x461)
+  ...
+
+=== 10s done ===
+  camera fps:   29.8
+  loop frames:  100
+  detections:   234
+  unique objects seen: chair, laptop, person
+```
+
+Use this over SSH when you don't want to open a browser, or when the
+dashboard is misbehaving and you want to confirm the AI pipeline itself
+still works.
+
+#### Step 3 — Dashboard (the real thing)
+
+```bash
+python3 dashboard.py --port 8080
+# or, for production: ~/omniai/util/service.sh start
+```
+
+Open in a browser on the same network:
 
 - Main dashboard: **https://omniai.local:8080/**
 - Kids dashboard: **https://omniai.local:8080/kids**
@@ -92,6 +134,14 @@ Then open in a browser on the same network:
 `omniai.local` is the Pi's mDNS/Bonjour name (the hostname set during Pi OS
 setup). If it doesn't resolve, use the Pi's IP from `hostname -I`. Accept
 the self-signed TLS warning on first load.
+
+#### Other helpful tests
+
+| Command | What it does |
+|---|---|
+| `python3 util/test_detection.py` | Full HTTPS dashboard variant focused on detection — useful for A/B testing models |
+| `python3 util/test_eye_display.py` | Cycles the OLED eye through every expression |
+| `python3 util/test_oled_brightness.py` | Calibrate SSD1351 brightness |
 
 ## IMX500 AI Camera
 
