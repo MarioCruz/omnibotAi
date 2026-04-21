@@ -2,6 +2,11 @@
 
 *When YOLO can't find it, ask Gemini to reason about where to look*
 
+> **Status: Proposed — not implemented as of v1.0.0.**
+> This is a design doc for a future escalation layer on top of the current
+> rule-based navigator. There is no `gemini_reasoner.py` in the repo yet.
+> Kept here as a living plan; contributions welcome.
+
 ---
 
 ## The Problem
