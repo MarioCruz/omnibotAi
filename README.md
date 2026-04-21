@@ -132,8 +132,21 @@ Open in a browser on the same network:
 - Kids dashboard: **https://omniai.local:8080/kids**
 
 `omniai.local` is the Pi's mDNS/Bonjour name (the hostname set during Pi OS
-setup). If it doesn't resolve, use the Pi's IP from `hostname -I`. Accept
-the self-signed TLS warning on first load.
+setup). If it doesn't resolve, use the Pi's IP from `hostname -I`.
+
+#### HTTPS (optional)
+
+The dashboard serves HTTPS if `cert.pem` and `key.pem` exist in the project
+root, otherwise falls back to plain HTTP. Generate a self-signed pair in
+~5 seconds — useful so iPad Safari stops complaining about insecure origin:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem \
+    -days 365 -subj "/CN=omniai.local"
+```
+
+Both files are gitignored (`*.pem`). Browsers will still show a one-time
+"not trusted" warning since it's self-signed — accept it once per device.
 
 #### Other helpful tests
 
@@ -194,11 +207,17 @@ omniai/
 ├── logs/                     # Runtime logs (gitignored)
 │   └── task.log              # Navigation decision log
 ├── util/                     # Test scripts and utilities
-│   ├── test_eye_display.py   # Eye display test
-│   ├── test_detection.py     # Camera/detection test
-│   ├── test_oled_brightness.py # OLED brightness calibration
-│   ├── generate_certs.sh     # SSL certificate generator
-│   └── start.sh              # Quick start script
+│   ├── smoke_test.py         # Pre-launch sanity check
+│   ├── test_camera_ai.py     # CLI camera + AI sanity test
+│   ├── test_detection.py     # Full HTTPS detection dashboard
+│   ├── test_eye_display.py   # Cycle the OLED eye through expressions
+│   ├── test_oled_brightness.py # SSD1351 brightness calibration
+│   ├── render_eye_gif.py     # Render eye expressions to a GIF
+│   ├── generate_phrases.sh   # Generate WAVs for pre-recorded phrases
+│   ├── service.sh            # Wrapper for systemctl start/stop/restart
+│   ├── install_service.sh    # Install omniai.service into systemd
+│   ├── omniai.service        # systemd unit
+│   └── start.sh              # Manual launcher (used by the service)
 ├── CLAUDE.md                 # Technical reference for Claude Code
 └── README.md                 # This file
 ```
