@@ -573,12 +573,12 @@ The Pi has `gh` CLI authenticated and tracks `origin/main` via HTTPS.
 
 ### Deploy via rsync (alternative)
 ```bash
-rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.pem' --exclude='.DS_Store' --exclude='._*' --exclude='models/' --exclude='.git/' --exclude='*.log' /Users/mariocruz/Documents/GitHub/omnibotAi/ admin@omniai.local:/home/admin/omniai/
+rsync -avz --exclude='venv/' --exclude='__pycache__/' --exclude='*.pyc' --exclude='*.pem' --exclude='.DS_Store' --exclude='._*' --exclude='models/' --exclude='.git/' --exclude='*.log' /path/to/omnibotAi/ admin@omniai.local:/home/admin/omniai/
 ```
 
 ### Sync from Pi (backup)
 ```bash
-/Users/mariocruz/Documents/GitHub/omnibotAi/sync_from_pi.sh
+/path/to/omnibotAi/sync_from_pi.sh
 ```
 
 ### Starting the Dashboard
