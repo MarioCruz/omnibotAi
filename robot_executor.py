@@ -37,13 +37,19 @@ class RobotCommandExecutor:
     # Don't retry connection more than once every RECONNECT_BACKOFF seconds.
     RECONNECT_BACKOFF = 30.0
 
-    def __init__(self, volume: float = 0.5, robot_url: Optional[str] = None):
+    def __init__(self, volume: float = 0.5, robot_url: Optional[str] = None,
+                 step_duration: int = 500, turn_duration: int = 750,
+                 nudge_duration: int = 300):
         """
         Initialize the robot executor.
 
         Args:
             volume: Audio volume for tones (0.0 to 1.0)
             robot_url: Unused for audio control (kept for compatibility)
+            step_duration: Forward/backward tone length in ms (default 500).
+                Lower = robot moves less per step but reacts to new detections faster.
+            turn_duration: Full L/R turn tone length in ms (default 750, ~90°).
+            nudge_duration: Small course-correction tone length in ms (default 300, ~30°).
         """
         # Clamp volume to valid range
         self.volume = max(0.0, min(1.0, volume))
@@ -52,12 +58,11 @@ class RobotCommandExecutor:
         self._cancel_pattern = False  # Flag to cancel running patterns
         self._last_connect_attempt = 0.0  # Wall-clock of last connect() try
 
-        # Movement durations (ms)
-        self.step_duration = 500
-        self.turn_duration = 750  # Short turn for course correction (~90°)
-        # Fine-adjust turn for lining up with a target without overshooting.
-        # ~40% of turn_duration = ~30-35° per nudge.
-        self.nudge_duration = 300
+        # Movement durations (ms) — clamp to safe range so a bad config can't
+        # produce a sub-100ms tone (the relay misses it) or a multi-second one.
+        self.step_duration = max(100, min(2000, int(step_duration)))
+        self.turn_duration = max(100, min(3000, int(turn_duration)))
+        self.nudge_duration = max(100, min(2000, int(nudge_duration)))
 
         # Pattern definitions
         self.patterns = {

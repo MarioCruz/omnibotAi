@@ -11,5 +11,9 @@
 
   "detector": "imx500",
   "volume": 0.5,
-  "port": 8080
+  "port": 8080,
+
+  "step_duration": 500,
+  "turn_duration": 750,
+  "nudge_duration": 300
 }

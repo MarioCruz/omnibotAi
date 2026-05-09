@@ -249,6 +249,24 @@ The robot is controlled via audio frequency tones:
 
 Connect the Pi's audio output to the Omnibot's cassette input (via audio jack or Bluetooth).
 
+### Tuning reaction time
+
+Each autonomous decision blocks until its movement tone finishes playing, so
+the upper bound on "decisions per second" is roughly `1 / step_duration`.
+Three knobs in `config.json` let you trade smoothness for snappiness without
+touching code:
+
+| Key | Default | What it controls |
+|---|---|---|
+| `step_duration` | `500` ms | Forward/backward tone length and dispatch interval |
+| `turn_duration` | `750` ms | Full L/R turn (~90°) |
+| `nudge_duration` | `300` ms | Small course correction (~30°) |
+
+Try `step_duration: 350`, `turn_duration: 500`, `nudge_duration: 200` for a
+faster-reacting robot. Values are clamped server-side (100-2000 ms for
+step/nudge, 100-3000 ms for turn) — anything below ~100 ms tends to miss
+the audio relay.
+
 ## Speech Features
 
 The robot can speak using text-to-speech or pre-recorded phrases.

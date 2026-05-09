@@ -189,7 +189,8 @@ def get_idle_time():
 
 def init_system(detector_backend='imx500', volume=0.5,
                 eye_display_type='st7735', eye_dc_pin=24, eye_rst_pin=25, eye_cs_pin=0, eye_spi_port=0,
-                eye_brightness=15, eye_rotation=0, eye_offset_x=0, eye_offset_y=0):
+                eye_brightness=15, eye_rotation=0, eye_offset_x=0, eye_offset_y=0,
+                step_duration=500, turn_duration=750, nudge_duration=300):
     """Initialize all system components"""
     global camera, detector, robot
 
@@ -229,9 +230,15 @@ def init_system(detector_backend='imx500', volume=0.5,
     )
 
     # Robot - now uses audio tones for Tomy Omnibot
-    print(f"[Dashboard] Initializing audio commander (volume: {volume})...")
+    print(f"[Dashboard] Initializing audio commander "
+          f"(volume={volume}, step={step_duration}ms, turn={turn_duration}ms, nudge={nudge_duration}ms)...")
     try:
-        robot = RobotCommandExecutor(volume=volume)
+        robot = RobotCommandExecutor(
+            volume=volume,
+            step_duration=step_duration,
+            turn_duration=turn_duration,
+            nudge_duration=nudge_duration,
+        )
         if not robot.connect():
             system_state['init_errors'].append("robot: connect() returned False")
     except Exception as e:
@@ -2370,6 +2377,9 @@ if __name__ == '__main__':
         eye_rotation=_cfg_int(robot_config, 'eye_rotation', 0),
         eye_offset_x=_cfg_int(robot_config, 'eye_offset_x', 0),
         eye_offset_y=_cfg_int(robot_config, 'eye_offset_y', 0),
+        step_duration=_cfg_int(robot_config, 'step_duration', 500),
+        turn_duration=_cfg_int(robot_config, 'turn_duration', 750),
+        nudge_duration=_cfg_int(robot_config, 'nudge_duration', 300),
     )
 
     # Start processing thread
