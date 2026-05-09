@@ -253,7 +253,10 @@ class RobotCommandExecutor:
                 self.audio.left(self.turn_duration // 4)  # Quarter turn
             elif step == 'right':
                 self.audio.right(self.turn_duration // 4)
-            time.sleep(0.1)  # Brief pause between steps
+            # Brief inter-step gap so the audio relay sees distinct tones.
+            # 100ms felt sluggish in dance (20 steps = 2s of dead time);
+            # 50ms still leaves headroom over the relay's debounce window.
+            time.sleep(0.05)
 
 
 # For testing

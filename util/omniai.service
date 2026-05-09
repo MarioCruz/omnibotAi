@@ -1,7 +1,7 @@
 [Unit]
 Description=OmniBot AI Dashboard
-After=network-online.target bluetooth.target sound.target
-Wants=network-online.target
+After=network.target bluetooth.target sound.target
+Wants=network.target
 
 [Service]
 Type=simple
