@@ -168,6 +168,14 @@ bt_cache_lock = threading.Lock()
 bt_cache = {'connected': False, 'devices': [], 'updated_at': 0.0}
 BT_POLL_INTERVAL = 5.0  # Seconds between bluetoothctl probes
 
+# Cached internet reachability — refreshed by internet_poll_loop. Used by
+# /api/describe to skip the Groq call (and its multi-second TCP timeout) when
+# WiFi is dead at a venue. Probes 1.1.1.1:53 because DNS-bypass + tiny payload.
+internet_cache_lock = threading.Lock()
+internet_cache = {'alive': False, 'updated_at': 0.0}
+INTERNET_POLL_INTERVAL = 15.0
+INTERNET_PROBE_TIMEOUT = 1.5  # seconds; bounded so the probe thread can't hang
+
 # If the camera is stuck this long, exit 1 so systemd restarts the process.
 # Below this threshold, /healthz reports "degraded" but stays alive.
 CAMERA_STALE_DEGRADED_SEC = 10
@@ -2070,10 +2078,23 @@ def api_describe():
     objects = [f"{d['label']} ({d['confidence']:.0%})" for d in detections[:5]]
     det_text = ', '.join(objects)
 
-    # Try Groq LLM for a natural description
+    # Try Groq LLM for a natural description — but only if we have an API key
+    # AND the background probe thinks the internet is reachable. Skipping the
+    # call when offline avoids the TCP-connect timeout and gives the kid an
+    # immediate (local) answer instead of a frozen UI.
     api_key = os.environ.get('GROQ_API_KEY')
     description = None
-    if api_key:
+    with internet_cache_lock:
+        net_alive = internet_cache['alive']
+        net_age = time.time() - internet_cache['updated_at'] if internet_cache['updated_at'] else None
+    # If the probe hasn't run yet (age=None) we tentatively try Groq once;
+    # the short timeout below caps the worst case. If the probe is fresh and
+    # says offline, we skip outright.
+    can_call_groq = bool(api_key) and (net_alive or net_age is None)
+    if not can_call_groq and api_key:
+        print(f"[Describe] Skipping Groq — internet probe says offline (age={net_age})")
+
+    if can_call_groq:
         try:
             resp = requests.post(
                 "https://api.groq.com/openai/v1/chat/completions",
@@ -2087,7 +2108,7 @@ def api_describe():
                     "temperature": 0.5,
                     "max_tokens": 30,
                 },
-                timeout=15
+                timeout=3
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -2241,6 +2262,37 @@ def _poll_bluetooth_once():
         return (False, [])
 
 
+def _poll_internet_once():
+    """Open a tiny TCP connection to 1.1.1.1:53 with a hard timeout."""
+    import socket
+    s = None
+    try:
+        s = socket.create_connection(("1.1.1.1", 53), timeout=INTERNET_PROBE_TIMEOUT)
+        return True
+    except Exception:
+        return False
+    finally:
+        if s is not None:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+
+def internet_poll_loop():
+    """Refresh internet-reachability flag every INTERNET_POLL_INTERVAL seconds."""
+    while not system_state['shutdown']:
+        alive = _poll_internet_once()
+        with internet_cache_lock:
+            internet_cache['alive'] = alive
+            internet_cache['updated_at'] = time.time()
+        # Sleep in small chunks so shutdown is responsive.
+        for _ in range(int(INTERNET_POLL_INTERVAL * 5)):
+            if system_state['shutdown']:
+                return
+            time.sleep(0.2)
+
+
 def bt_poll_loop():
     """Refresh Bluetooth status in the background every BT_POLL_INTERVAL seconds."""
     while not system_state['shutdown']:
@@ -2389,6 +2441,11 @@ if __name__ == '__main__':
     # Start MJPEG encoder thread (encodes once, shared by all clients)
     encoder_thread = threading.Thread(target=mjpeg_encoder_loop, daemon=True)
     encoder_thread.start()
+
+    # Start internet reachability probe so /api/describe can skip Groq when
+    # WiFi is down without paying a TCP timeout.
+    internet_thread = threading.Thread(target=internet_poll_loop, daemon=True)
+    internet_thread.start()
 
     # Start Bluetooth poll thread (keeps /api/bluetooth non-blocking)
     bt_thread = threading.Thread(target=bt_poll_loop, daemon=True)
