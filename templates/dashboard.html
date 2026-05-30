@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Robot Dashboard</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <link rel="stylesheet" href="/static/omni.css">
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
             background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -77,12 +77,8 @@
             border-radius: 8px;
             font-size: 14px;
             font-weight: 600;
-            cursor: pointer;
             transition: all 0.2s;
-            user-select: none;
-            -webkit-user-select: none;
-            -webkit-tap-highlight-color: transparent;
-            touch-action: manipulation;    /* remove 300ms tap delay */
+            /* cursor + touch defaults come from omni.css */
         }
         .controls button:hover { transform: scale(1.02); }
         .controls button:active { transform: scale(0.97); opacity: 0.85; }

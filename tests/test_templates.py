@@ -12,6 +12,7 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TPL = os.path.join(ROOT, 'templates')
+STATIC = os.path.join(ROOT, 'static')
 
 
 def read(name):
@@ -41,6 +42,22 @@ class Templates(unittest.TestCase):
         # If the extraction grabbed the closing '"""' it would show up here.
         for name in ('dashboard.html', 'kids.html'):
             self.assertNotIn('"""', read(name))
+
+    def test_shared_stylesheet_exists_and_has_reset(self):
+        css = os.path.join(STATIC, 'omni.css')
+        self.assertTrue(os.path.isfile(css))
+        with open(css, encoding='utf-8') as f:
+            body = f.read()
+        self.assertIn('box-sizing: border-box', body)
+
+    def test_both_templates_link_shared_stylesheet(self):
+        for name in ('dashboard.html', 'kids.html'):
+            self.assertIn('/static/omni.css', read(name))
+
+    def test_reset_not_duplicated_in_templates(self):
+        # The '* { ... }' reset now lives only in omni.css.
+        for name in ('dashboard.html', 'kids.html'):
+            self.assertNotIn('* { margin: 0; padding: 0;', read(name))
 
 
 if __name__ == '__main__':

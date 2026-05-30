@@ -1,0 +1,25 @@
+/* omni.css — base styles shared by both dashboards (dashboard.html + kids.html).
+ *
+ * Deliberately small: the two UIs are intentionally different themes (dark
+ * glass vs. synthwave neon), so almost all styling stays per-template. Only
+ * the cross-cutting foundation lives here — the reset and the touch-first
+ * defaults that matter because the dashboard is driven from phones/tablets.
+ *
+ * All rules here are element-level (lowest specificity), so any per-template
+ * .class rule overrides them without a fight. */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Touch-first interactive defaults. touch-action removes the 300ms tap delay;
+ * tap-highlight + user-select stop the grey flash / text-select on fast taps. */
+button {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+}
