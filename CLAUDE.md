@@ -563,8 +563,8 @@ Current `config.json` eye settings (SSD1351 OLED):
 ```json
 "eye_display": "ssd1351", "eye_spi_port": 0,
 "eye_dc_pin": 24, "eye_rst_pin": 25, "eye_cs_pin": 0,
-"eye_brightness": 10, "eye_rotation": 90,
-"eye_offset_x": 3, "eye_offset_y": -3
+"eye_brightness": 10, "eye_rotation": 270,
+"eye_offset_x": -3, "eye_offset_y": 3
 ```
 ST7735S TFT alternate settings (set `"eye_display": "st7735"`): 128x160,
 `rotation=0`, internal `offset_left=2, offset_top=1`, `invert=False`.
