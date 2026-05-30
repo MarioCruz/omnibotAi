@@ -28,16 +28,16 @@
                 </div>
                 <div class="task-input">
                     <input type="text" id="taskInput" placeholder="Enter task (e.g., Find the person)" value="Find the person">
-                    <button class="btn-primary" onclick="setTask()">Set Task</button>
-                    <button class="btn-secondary" onclick="endTask()">End Task</button>
-                    <button class="btn-secondary" onclick="describeScene()">Describe</button>
-                    <label style="display:flex; align-items:center; gap:5px; font-size:12px; cursor:pointer;">
+                    <button onclick="setTask()">Set Task</button>
+                    <button onclick="endTask()" style="background:#ff922b;">End Task</button>
+                    <button onclick="describeScene()" style="background:#aa44ff; color:#fff;">Describe</button>
+                    <label style="display:flex; align-items:center; gap:5px; font-size:12px; color:#888; cursor:pointer;">
                         <input type="checkbox" id="speakLocal" checked> Speak here
                     </label>
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" style="margin-top: 20px;">
                 <h2>Manual Controls (Audio Tones)</h2>
                 <div class="controls">
                     <button class="btn-cmd" onclick="sendCommand('left')">&#9664; Left</button>
@@ -47,29 +47,29 @@
                     <button class="btn-cmd" onclick="sendCommand('backward')">&#9660; Back</button>
                     <button class="btn-cmd" onclick="sendCommand('circle')">Circle</button>
                     <button class="btn-cmd" onclick="sendCommand('square')">Square</button>
-                    <button class="btn-cmd btn-danger" onclick="sendCommand('stop')">Stop</button>
+                    <button class="btn-cmd" onclick="sendCommand('stop')" style="background:#ff4444;">Stop</button>
                     <button class="btn-cmd" onclick="sendCommand('spiral')">Spiral</button>
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" style="margin-top: 20px;">
                 <h2>Robot Speech</h2>
                 <div class="task-input">
                     <input type="text" id="speechInput" placeholder="Type message for robot to speak..." value="Hello, I am Tomy Omnibot">
-                    <button class="btn-primary" onclick="speakText()">Speak</button>
+                    <button onclick="speakText()">Speak</button>
                 </div>
-                <div class="controls cols-5">
-                    <button class="btn-cmd" onclick="playPhrase('hello')">Hello</button>
-                    <button class="btn-cmd" onclick="playPhrase('yes')">Yes</button>
-                    <button class="btn-cmd" onclick="playPhrase('no')">No</button>
-                    <button class="btn-cmd" onclick="playPhrase('thanks')">Thanks</button>
-                    <button class="btn-cmd btn-danger" onclick="sendCommand('speaker_off')">🔇 Speaker Off</button>
+                <div class="controls" style="grid-template-columns: repeat(5, 1fr); margin-top: 10px;">
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('hello')">Hello</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('yes')">Yes</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('no')">No</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('thanks')">Thanks</button>
+                    <button class="btn-cmd" style="background:#ff4444;" onclick="sendCommand('speaker_off')">🔇 Speaker Off</button>
                 </div>
-                <div class="controls cols-4">
-                    <button class="btn-cmd" onclick="playPhrase('ready')">Ready</button>
-                    <button class="btn-cmd" onclick="playPhrase('goodbye')">Goodbye</button>
-                    <button class="btn-cmd" onclick="playPhrase('sorry')">Sorry</button>
-                    <button class="btn-cmd" onclick="playPhrase('okay')">Okay</button>
+                <div class="controls" style="grid-template-columns: repeat(4, 1fr); margin-top: 8px;">
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('ready')">Ready</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('goodbye')">Goodbye</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('sorry')">Sorry</button>
+                    <button class="btn-cmd" style="background:#ff922b;" onclick="playPhrase('okay')">Okay</button>
                 </div>
             </div>
         </div>
@@ -101,21 +101,21 @@
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" style="margin-top: 20px;">
                 <h2>Detection History</h2>
                 <div class="log" id="detectionsList" style="max-height: 200px; overflow-y: auto;">
                     <div style="color: #666; text-align: center; padding: 20px;">No detections yet</div>
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" style="margin-top: 20px;">
                 <h2>Navigation Log</h2>
                 <div class="nav-log" id="navLog">
                     <div style="color: #666; text-align: center; padding: 20px;">Set a task to start navigation</div>
                 </div>
             </div>
 
-            <div class="panel">
+            <div class="panel" style="margin-top: 20px;">
                 <h2>Activity Log</h2>
                 <div class="log" id="activityLog"></div>
             </div>
