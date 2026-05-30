@@ -234,6 +234,12 @@ class RobotCommandExecutor:
             time.sleep(max(0.0, delay))
         return results
 
+    def _quarter_turn(self):
+        """Quarter-turn tone length (ms) for pattern moves, floored at the
+        100ms relay minimum so a low turn_duration can't produce a tone the
+        robot's audio relay silently drops."""
+        return max(100, self.turn_duration // 4)
+
     def _run_pattern(self, pattern_name: str):
         """Execute a movement pattern (can be cancelled with stop command)"""
         if pattern_name not in self.patterns:
@@ -250,9 +256,9 @@ class RobotCommandExecutor:
             elif step == 'backward':
                 self.audio.backward(self.step_duration)
             elif step == 'left':
-                self.audio.left(self.turn_duration // 4)  # Quarter turn
+                self.audio.left(self._quarter_turn())  # Quarter turn
             elif step == 'right':
-                self.audio.right(self.turn_duration // 4)
+                self.audio.right(self._quarter_turn())
             # Brief inter-step gap so the audio relay sees distinct tones.
             # 100ms felt sluggish in dance (20 steps = 2s of dead time);
             # 50ms still leaves headroom over the relay's debounce window.
