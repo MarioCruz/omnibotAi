@@ -201,6 +201,25 @@ dashboard, paths preserved (`/kids` → `:8080/kids`). Because it's a redirect
 `:8080` — so the self-signed warning may appear once per origin the first
 time. See `util/redirect_to_dashboard.py` for the implementation.
 
+#### Optional API token (auth)
+
+By default the dashboard has **no authentication** — anyone on the LAN can
+drive the robot. That's usually fine for a home network. To lock down the
+robot-*control* endpoints, set a token (viewing pages and the video stream
+stay open either way):
+
+```bash
+echo "DASHBOARD_TOKEN=pick-a-long-secret" >> .env   # or "dashboard_token" in config.json
+~/omniai/util/service.sh restart
+```
+
+When set, `POST /api/command|start|stop|pause|task|describe` require the
+token via the `X-Auth-Token` header, a `?token=...` query param, or the
+`omni_token` cookie. **Open the dashboard once at
+`https://omniai.local/?token=pick-a-long-secret`** — that stores a cookie, so
+the page's own buttons authenticate automatically from then on (no need to
+re-enter it). Empty/unset token = auth disabled (the default).
+
 #### Other helpful tests
 
 | Command | What it does |

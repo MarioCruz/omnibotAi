@@ -664,6 +664,12 @@ Returns `503` when any subsystem is degraded. `/health` is an alias.
 stdout prints under systemd go to journald, which has its own rotation.
 
 ## Security Notes
+- Optional API token (opt-in, OFF by default): set `DASHBOARD_TOKEN` (env/.env)
+  or `dashboard_token` (config.json) to gate the robot-control POST endpoints
+  (`/api/command|start|stop|pause|task|describe`). Token via `X-Auth-Token`
+  header, `?token=` query, or `omni_token` cookie; a valid `?token=` sets the
+  cookie so the browser UI stays frictionless. Pages/stream/healthz stay open.
+  Implemented in `dashboard.py` `_enforce_token()` / `_persist_token_cookie()`.
 - `speak()` sanitizes input with regex: `[^a-zA-Z0-9\s.,!?'-]` removed
 - `espeak` called with `--` to prevent option injection
 - API endpoints validate `request.json` (handles None case)
