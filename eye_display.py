@@ -9,7 +9,7 @@ Display type is set via config.json "eye_display": "st7735" or "ssd1351"
 import time
 import threading
 import random
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 # Try to import display libraries (only work on Pi)
 HAS_ST7735 = False
@@ -139,6 +139,32 @@ class EyeDisplay:
         self.blink_time = 0
         self.next_blink = time.time() + random.uniform(2, 5)
 
+        # Boot info screen (IP / hostname / status shown before the eye).
+        self._boot_lines = None
+        self._boot_until = 0.0
+        self._boot_font = self._load_font(13)
+        self._boot_font_small = self._load_font(11)
+
+    @staticmethod
+    def _load_font(size):
+        """Best-effort TrueType; falls back to PIL's bitmap default."""
+        for path in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                     "DejaVuSans-Bold.ttf"):
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+        return ImageFont.load_default()
+
+    def set_boot_info(self, lines, hold_seconds=90):
+        """Show a few short text lines (first line is the title) for
+        `hold_seconds` before the eye animation takes over. Safe to call
+        before or after start(); the animation loop renders it until the
+        hold expires, then transitions to the eye automatically."""
+        with self.lock:
+            self._boot_lines = [str(l) for l in lines if str(l).strip()]
+            self._boot_until = time.time() + max(0, hold_seconds)
+
     def _set_oled_brightness(self, level):
         """Set SSD1351 brightness via command + data (like Arduino's sendCommand).
         level: 0-15 for master contrast (0x00-0x0F)
@@ -205,12 +231,51 @@ class EyeDisplay:
         with self.lock:
             self.blink_time = time.time()
 
+    def _push(self, image):
+        """Send a frame to the panel, applying the configured rotation."""
+        if not self.display:
+            return
+        display_image = image.rotate(-self.rotation, expand=False) if self.rotation else image
+        if self._luma_device:
+            self._luma_device.display(display_image.convert(self._luma_device.mode))
+        else:
+            self.display.display(display_image)
+
+    def _draw_boot(self, lines):
+        """Render the boot info screen — centered lines, title in cyan."""
+        self.draw.rectangle([0, 0, self.WIDTH, self.HEIGHT], fill=self.BG_COLOR)
+        fonts = [self._boot_font if i == 0 else self._boot_font_small
+                 for i in range(len(lines))]
+        boxes = [self.draw.textbbox((0, 0), t, font=f) for t, f in zip(lines, fonts)]
+        heights = [b[3] - b[1] for b in boxes]
+        gap = 4
+        total = sum(heights) + gap * max(0, len(lines) - 1)
+        y = max(2, (self.HEIGHT - total) // 2)
+        for i, (text, font, box, h) in enumerate(zip(lines, fonts, boxes, heights)):
+            w = box[2] - box[0]
+            x = max(0, (self.WIDTH - w) // 2)
+            color = self.EYE_COLOR if i == 0 else self.SCLERA_COLOR
+            self.draw.text((x - box[0], y - box[1]), text, font=font, fill=color)
+            y += h + gap
+
     def _animation_loop(self):
         """Main animation loop"""
         while self.running:
             try:
                 # Check for random blinks
                 now = time.time()
+
+                # Boot info screen: hold IP/hostname/status before the eye.
+                with self.lock:
+                    if self._boot_lines is not None and now >= self._boot_until:
+                        self._boot_lines = None  # hold expired -> show the eye
+                    boot_lines = list(self._boot_lines) if self._boot_lines else None
+                if boot_lines is not None:
+                    self._draw_boot(boot_lines)
+                    self._push(self.image)
+                    time.sleep(0.1)
+                    continue
+
                 if now >= self.next_blink:
                     self.blink()
                     self.next_blink = now + random.uniform(3, 7)
@@ -236,18 +301,8 @@ class EyeDisplay:
                 # Draw the eye
                 self._draw_eye()
 
-                # Update display (apply rotation if needed)
-                if self.display:
-                    if self.rotation:
-                        # PIL rotate uses counter-clockwise, so 90° CW = 270° in PIL
-                        display_image = self.image.rotate(-self.rotation, expand=False)
-                    else:
-                        display_image = self.image
-
-                    if self._luma_device:
-                        self._luma_device.display(display_image.convert(self._luma_device.mode))
-                    else:
-                        self.display.display(display_image)
+                # Update display (rotation handled in _push)
+                self._push(self.image)
 
                 time.sleep(0.033)  # ~30 FPS
 

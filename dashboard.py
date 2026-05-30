@@ -320,6 +320,32 @@ def init_system(detector_backend='imx500', volume=0.5,
             eye_display.start()
             partially_initialized = None  # Fully initialized, no cleanup needed
             print(f"[Dashboard] Eye display started ({eye_display_type})")
+
+            # Show network info (hostname / IP / status) on the panel for a
+            # bit so you can confirm the robot is online before the eye takes
+            # over. Hold duration is configurable via config.json.
+            try:
+                import socket as _sock
+                local_ip = None
+                probe = _sock.socket(_sock.AF_INET, _sock.SOCK_DGRAM)
+                probe.settimeout(1.0)
+                try:
+                    probe.connect(("8.8.8.8", 80))  # no packets sent; just picks the iface
+                    local_ip = probe.getsockname()[0]
+                finally:
+                    probe.close()
+                hostname = _sock.gethostname() or "omniai"
+                boot_hold = _cfg_int(robot_config, 'eye_boot_info_seconds', 90)
+                eye_display.set_boot_info(
+                    ["OMNI AI",
+                     f"{hostname}.local",
+                     local_ip or "no network",
+                     "ONLINE" if local_ip else "OFFLINE"],
+                    hold_seconds=boot_hold,
+                )
+                print(f"[Dashboard] Eye boot info: ip={local_ip} hold={boot_hold}s")
+            except Exception as e:
+                print(f"[Dashboard] Eye boot info skipped: {e}")
         except Exception as e:
             print(f"[Dashboard] Eye display not available: {e}")
             system_state['init_errors'].append(f"eye: {e}")
