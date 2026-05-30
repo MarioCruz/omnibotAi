@@ -426,9 +426,37 @@ python util/test_eye_display.py
 ```
 
 ### Display Configuration
-- **Mode**: Portrait (128x160)
-- **Rotation**: 0
-- **Offsets**: left=2, top=1
+
+All eye settings live in `config.json` (the dashboard reads them and passes
+them to `EyeDisplay`, so prefer editing config over code):
+
+| Key | Example | Meaning |
+|-----|---------|---------|
+| `eye_display` | `ssd1351` | Panel type: `ssd1351` OLED (128x128) or `st7735` TFT (128x160) |
+| `eye_brightness` | `10` | SSD1351 master contrast 0–15 (ignored by ST7735) |
+| `eye_rotation` | `270` | Screen rotation 0/90/180/270 |
+| `eye_offset_x` / `eye_offset_y` | `-3` / `3` | Pixel nudge to center the eye (pre-rotation) |
+| `eye_boot_info_seconds` | `90` | How long the boot info screen shows before the eye (see below) |
+
+**Mounted the panel upside down?** Add 180° to `eye_rotation` (e.g. `90 → 270`)
+and negate the offsets (`3 → -3`). If the image ends up *mirrored* rather than
+rotated, that's a physical orientation issue rotation can't fix.
+
+### Boot info screen
+
+On startup the display shows the robot's network info for
+`eye_boot_info_seconds` (default 90) before the eye animation takes over, so
+you can confirm it came online at a glance:
+
+```
+   OMNI AI
+ OmniAi.local
+ 192.168.4.39
+   ONLINE          (or "no network" / "OFFLINE" if Wi-Fi didn't come up)
+```
+
+Set `eye_boot_info_seconds: 0` in `config.json` to skip it and go straight to
+the eye.
 
 ### Expressions
 
