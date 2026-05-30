@@ -109,6 +109,46 @@ app = Flask(__name__)
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
+# --- Optional API auth (opt-in; OFF unless a token is configured) ---
+# Set DASHBOARD_TOKEN in .env (or "dashboard_token" in config.json) to require
+# a token for the robot-CONTROL endpoints below. Viewing pages and the video
+# stream never need auth. The token may arrive via the X-Auth-Token header, a
+# ?token=... query param, or the omni_token cookie; loading any URL with
+# ?token=... stores the cookie so the browser's own API calls authenticate
+# automatically from then on. Empty/unset => auth disabled (default behavior).
+DASHBOARD_TOKEN = (os.environ.get('DASHBOARD_TOKEN')
+                   or str(robot_config.get('dashboard_token', ''))).strip()
+
+# State-changing endpoints that drive the robot/system. Gated only when a token
+# is configured. (GET /api/status, /api/bluetooth, /stream, /healthz stay open.)
+_PROTECTED_PREFIXES = ('/api/start', '/api/stop', '/api/pause',
+                       '/api/task', '/api/command', '/api/describe')
+
+
+@app.before_request
+def _enforce_token():
+    if not DASHBOARD_TOKEN:
+        return  # auth disabled
+    if not request.path.startswith(_PROTECTED_PREFIXES):
+        return  # pages / stream / status / health stay open
+    provided = (request.headers.get('X-Auth-Token')
+                or request.args.get('token')
+                or request.cookies.get('omni_token') or '').strip()
+    if provided == DASHBOARD_TOKEN:
+        return
+    return jsonify(error='unauthorized',
+                   hint='open the dashboard once with ?token=... to authorize this device'), 401
+
+
+@app.after_request
+def _persist_token_cookie(resp):
+    # Remember a valid query token so subsequent same-origin API calls (the
+    # dashboard's own buttons) authenticate via cookie without re-entering it.
+    if DASHBOARD_TOKEN and request.args.get('token', '').strip() == DASHBOARD_TOKEN:
+        resp.set_cookie('omni_token', DASHBOARD_TOKEN, max_age=60 * 60 * 24 * 365,
+                        secure=True, httponly=True, samesite='Lax')
+    return resp
+
 # Global state
 system_state = {
     'running': False,
