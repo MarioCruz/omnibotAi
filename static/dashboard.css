@@ -1,0 +1,197 @@
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #eee;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        .header h1 {
+            color: #00d4ff;
+            font-size: 28px;
+            margin-bottom: 5px;
+        }
+        .header .status {
+            font-size: 14px;
+            color: #888;
+        }
+        .header .status.running { color: #00ff88; }
+        .header .status.stopped { color: #ff4444; }
+
+        .container {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .panel {
+            background: rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 15px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .panel h2 {
+            color: #00d4ff;
+            font-size: 16px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .stream-container {
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .stream-container img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .controls {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .controls button {
+            padding: 12px;
+            min-height: 48px;              /* touch target: Apple HIG minimum 44pt */
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            /* cursor + touch defaults come from omni.css */
+        }
+        .controls button:hover { transform: scale(1.02); }
+        .controls button:active { transform: scale(0.97); opacity: 0.85; }
+        .btn-start { background: #00ff88; color: #000; }
+        .btn-stop { background: #ff4444; color: #fff; }
+        .btn-pause { background: #ffaa00; color: #000; }
+        .btn-cmd { background: #0066ff; color: #fff; }
+
+        .task-input {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .task-input input {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 6px;
+            background: rgba(0,0,0,0.3);
+            color: #fff;
+            font-size: 14px;
+        }
+        .task-input button {
+            padding: 10px 20px;
+            background: #00d4ff;
+            color: #000;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .detections {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .detection-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: rgba(0,255,136,0.1);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            border-left: 3px solid #00ff88;
+        }
+        .detection-item .label { font-weight: 600; }
+        .detection-item .confidence { color: #00ff88; }
+
+        .commands {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .command-item {
+            padding: 8px 12px;
+            background: rgba(0,102,255,0.1);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            border-left: 3px solid #0066ff;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+        .stat-item {
+            background: rgba(0,0,0,0.2);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .stat-item .value {
+            font-size: 24px;
+            font-weight: 700;
+            color: #00d4ff;
+        }
+        .stat-item .label {
+            font-size: 12px;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .log {
+            max-height: 150px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+            background: rgba(0,0,0,0.3);
+            padding: 10px;
+            border-radius: 6px;
+        }
+        .log-entry { margin-bottom: 5px; color: #888; }
+        .log-entry.info { color: #00d4ff; }
+        .log-entry.success { color: #00ff88; }
+        .log-entry.error { color: #ff4444; }
+
+        .nav-log {
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .nav-entry {
+            padding: 6px 10px;
+            margin-bottom: 4px;
+            border-radius: 4px;
+            background: rgba(0,0,0,0.3);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .nav-entry .nav-time { color: #666; font-size: 11px; min-width: 70px; }
+        .nav-entry .nav-target { color: #00d4ff; font-weight: 600; min-width: 80px; }
+        .nav-entry .nav-action { font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 11px; }
+        .nav-action.forward { background: #00ff88; color: #000; }
+        .nav-action.left { background: #ff922b; color: #000; }
+        .nav-action.right { background: #ff922b; color: #000; }
+        .nav-action.stop { background: #ff4444; color: #fff; }
+        .nav-entry .nav-reason { color: #aaa; font-size: 11px; }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+        }
