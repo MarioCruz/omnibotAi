@@ -92,16 +92,9 @@ cd ~/omniai
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
 
-# Install Python dependencies
-# - flask + flask-cors + flask-socketio: dashboard server + live updates
-# - requests: calls the Groq API for the optional "describe scene" button
-# - opencv-python + numpy: MJPEG frame encoding and bbox math
-# - sounddevice: audio device probing (tones/speech play via sox + pw-play)
-# - pillow: PIL image buffers for the eye rendering
-# - st7735 + gpiodevice: drivers for the ST7735S TFT eye display
-# - luma.oled: driver for the SSD1351 OLED eye display (pick the one you have)
-pip install flask flask-cors flask-socketio requests \
-    opencv-python numpy sounddevice pillow st7735 gpiodevice luma.oled
+# Install Python dependencies (single source of truth — see requirements.txt
+# for what each one is for and which eye-display driver to keep).
+pip install -r requirements.txt
 
 # Optional: enable the "Describe scene" button with a free Groq API key.
 # Without it the dashboard still runs; describe falls back to a plain object list.
@@ -191,9 +184,10 @@ Both files are gitignored (`*.pem`). Browsers will still show a one-time
 
 The dashboard binds port 8080 (an unprivileged port the `admin` user can
 use). To reach it at plain **`https://omniai.local`** without typing the
-port, install the tiny redirect front-door, which listens on ports 80 and
-443 and `301`-redirects every request to `:8080` (reusing the same
-`cert.pem`/`key.pem`):
+port, a tiny redirect front-door listens on ports 80 and 443 and
+`301`-redirects every request to `:8080` (reusing the same
+`cert.pem`/`key.pem`). `install_service.sh` sets this up by default; to add
+it on its own:
 
 ```bash
 sudo cp ~/omniai/util/omniai-redirect.service /etc/systemd/system/
@@ -650,23 +644,21 @@ For auto-start on boot and automatic restart on crash, install the
 ```
 
 The installer copies `util/omniai.service` to `/etc/systemd/system/`,
-reloads systemd, enables it at boot, and starts it. The unit sets
-`Restart=on-failure` with a 5-second backoff and a 5-crash-in-2-minutes
-rate limit. The dashboard itself calls `os._exit(1)` when the camera is
-stale for 60+ seconds, so systemd restarts it cleanly.
-
-To also serve the clean `https://omniai.local` URL (no `:8080`), install the
-redirect front-door unit alongside it:
+reloads systemd, enables it at boot, and starts it — **and by default also
+installs the clean-URL redirect** (`omniai-redirect.service`) so
+`https://omniai.local` works with no port. Pass `--no-redirect` to skip it:
 
 ```bash
-sudo cp ~/omniai/util/omniai-redirect.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now omniai-redirect
+~/omniai/util/install_service.sh               # dashboard + clean-URL redirect
+~/omniai/util/install_service.sh --no-redirect # dashboard only
 ```
 
-It runs as root (to bind the privileged ports 80/443) and `301`-redirects to
-the dashboard on `:8080`. It's independent of `omniai.service` — if the
-dashboard restarts, the redirect keeps working.
+`omniai.service` sets `Restart=on-failure` with a 5-second backoff and a
+5-crash-in-2-minutes rate limit; the dashboard calls `os._exit(1)` when the
+camera is stale for 60+ seconds so systemd restarts it cleanly. The redirect
+unit runs as root (to bind privileged ports 80/443) and `301`-redirects to
+`:8080`, independent of the dashboard — if one restarts, the other keeps
+working.
 
 Day-to-day commands — use the `util/service.sh` wrapper:
 
