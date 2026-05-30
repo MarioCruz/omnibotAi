@@ -6,6 +6,7 @@ Generates audio frequency tones to control the robot
 
 import numpy as np
 import time
+import re
 import subprocess
 import tempfile
 import wave
@@ -373,6 +374,21 @@ class AudioCommander:
             # Reset stopping flag AFTER speaker_off tone is done
             self._stopping = False
 
+    # Security boundary: text reaches speak_pi.sh as an argv element, so strip
+    # everything outside this allow-list before it ever leaves Python. Kept as a
+    # static method (not an inline regex) so it can be unit-tested directly.
+    _SANITIZE_RE = re.compile(r"[^a-zA-Z0-9\s.,!?'-]")
+
+    @staticmethod
+    def sanitize_speech(text: str) -> str:
+        """Strip any character that isn't alphanumeric, whitespace, or basic
+        punctuation (. , ! ? ' -). Removes shell metacharacters, quotes, and
+        control chars that could enable command injection. Returns '' for input
+        that is empty or entirely disallowed."""
+        if not isinstance(text, str):
+            return ""
+        return AudioCommander._SANITIZE_RE.sub("", text)
+
     def speak(self, text: str):
         """
         Speak text using the speak_pi.sh script (proven to work with Bluetooth).
@@ -380,10 +396,8 @@ class AudioCommander:
         Args:
             text: Text to speak (sanitized to alphanumeric, spaces, and basic punctuation)
         """
-        import re
-
         # Sanitize text to prevent command injection
-        sanitized = re.sub(r'[^a-zA-Z0-9\s.,!?\'-]', '', text)
+        sanitized = self.sanitize_speech(text)
         if not sanitized:
             print("[AudioCommander] No valid text to speak after sanitization")
             return

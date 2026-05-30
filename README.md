@@ -197,7 +197,7 @@ omniai/
 ├── robot_executor.py         # Robot command executor (audio tones + speech)
 ├── audio_commander.py        # Audio frequency generator + speech (thread-safe)
 ├── eye_display.py            # Animated eye display (ST7735S TFT / SSD1351 OLED)
-├── llm_command_generator.py  # LLM integration (kept for future scene description)
+├── templates/                # dashboard.html + kids.html (served by dashboard.py)
 ├── config.json               # Hardware and display configuration
 ├── speak_pi.sh               # Text-to-speech script (Pi - espeak + pw-play)
 ├── speak_phrase.sh           # Pre-recorded phrase player (Pi)
@@ -497,8 +497,9 @@ The rule-based engine uses actual bounding box coordinates — if the person's c
 left of frame center, turn left; if centered, go forward; if filling >60% of frame, stop.
 It makes correct decisions instantly every ~2 seconds.
 
-The `llm_command_generator.py` module is kept in the repo for potential future features like
-scene description or voice interaction, where latency is acceptable and position math isn't needed.
+The old `llm_command_generator.py` LLM-navigation experiment has been removed (see git history).
+The one place an LLM is still useful — describing the scene, where latency is acceptable and
+position math isn't needed — is handled inline by the dashboard's `/api/describe` endpoint via Groq.
 
 ### Task Log
 

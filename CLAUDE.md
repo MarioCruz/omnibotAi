@@ -226,16 +226,20 @@ NAV target=person (78%) pos=x:0 cx:140 frame_cx:320 commands=['step("left")'] | 
 NAV target=person (73%) pos=x:140 cx:346 frame_cx:320 commands=['step("stop")'] | person fills 64% -> STOP
 ```
 
-## LLM Setup (Optional - for future "describe scene" feature)
+## LLM Setup (Optional — "describe scene" feature)
 
-Groq API key can be set for potential future features (scene description, voice interaction):
+Navigation is purely rule-based (no LLM). The only LLM use is the optional
+"describe scene" button, handled inline by `dashboard.py`'s `/api/describe`
+endpoint, which sends the current detections to Groq. Set a key to enable it:
 
 ```bash
-echo "GROQ_API_KEY=your_api_key_here" > .env
-# Get free API key at https://console.groq.com
+echo "GROQ_API_KEY=your_api_key_here" > .env   # .env is gitignored
+# Get a free API key at https://console.groq.com
 ```
 
-The `llm_command_generator.py` module is kept in the repo but is not used for navigation.
+Without a key the dashboard still runs; only the describe button is disabled.
+(The old `llm_command_generator.py` module — an abandoned LLM-navigation
+experiment — was removed; see git history if you need it.)
 
 ## Available Robot Commands
 
@@ -483,13 +487,29 @@ self._stopping = False              # Flag to abort speech
 # 4. Sends speaker_off tone via sox | pw-play
 ```
 
-### EyeDisplay (ST7735S TFT)
-Animated robot eye on 1.8" ST7735S TFT (128x160 RGB) connected via SPI.
+### EyeDisplay (ST7735S TFT or SSD1351 OLED)
+Animated robot eye on SPI. Supports two panels, selected by `config.json`'s
+`"eye_display"` key:
+
+| `eye_display` | Panel | Resolution |
+|---------------|-------|------------|
+| `ssd1351`     | SSD1351 OLED (**current default in config.json**) | 128x128 |
+| `st7735`      | ST7735S 1.8" TFT | 128x160 |
+
+`dashboard.py` reads the eye_* keys from `config.json` and passes them to the
+constructor, so prefer changing config over editing code:
 
 ```python
 from eye_display import EyeDisplay
 
-eye = EyeDisplay(dc_pin=24, rst_pin=25, cs_pin=0)
+# Full signature (defaults shown):
+eye = EyeDisplay(
+    display_type='ssd1351',   # or 'st7735'
+    dc_pin=24, rst_pin=25, cs_pin=0, spi_port=0,
+    brightness=15,            # SSD1351 master contrast 0-15 (ignored by ST7735)
+    rotation=0,               # 0/90/180/270
+    offset_x=0, offset_y=0,   # pre-rotation pixel shift to center the eye
+)
 eye.start()
 
 # Set expressions
@@ -512,9 +532,9 @@ eye.blink()
 eye.stop()
 ```
 
-### ST7735S Wiring
-| ST7735S Pin | Raspberry Pi GPIO |
-|-------------|-------------------|
+### Wiring (same SPI pins for both panels)
+| Panel Pin | Raspberry Pi GPIO |
+|-----------|-------------------|
 | VCC | 3.3V |
 | GND | GND |
 | SCL (SCLK) | GPIO11 (SPI0 SCLK) |
@@ -522,7 +542,7 @@ eye.stop()
 | RES (RST) | GPIO25 |
 | DC | GPIO24 |
 | CS | GPIO8 (SPI0 CE0) |
-| BLK | 3.3V (backlight always on) |
+| BLK (ST7735 backlight) | 3.3V (SSD1351 OLED has no backlight pin) |
 
 ### Eye Expressions
 | Constant | Description |
@@ -539,18 +559,20 @@ eye.stop()
 | `EXPR_BLINK` | Fully closed |
 
 ### Display Configuration
-```python
-# ST7735S 1.8" TFT working settings:
-width=128, height=160   # Portrait mode
-rotation=0
-offset_left=2, offset_top=1
-invert=False
+Current `config.json` eye settings (SSD1351 OLED):
+```json
+"eye_display": "ssd1351", "eye_spi_port": 0,
+"eye_dc_pin": 24, "eye_rst_pin": 25, "eye_cs_pin": 0,
+"eye_brightness": 10, "eye_rotation": 90,
+"eye_offset_x": 3, "eye_offset_y": -3
 ```
+ST7735S TFT alternate settings (set `"eye_display": "st7735"`): 128x160,
+`rotation=0`, internal `offset_left=2, offset_top=1`, `invert=False`.
 
 ### Testing Eye Display
 ```bash
-# Install libraries
-pip install st7735 gpiodevice
+# Install libraries (luma.oled for SSD1351, st7735 for the TFT)
+pip install luma.oled st7735 gpiodevice
 
 # Run test (cycles through all expressions)
 python util/test_eye_display.py

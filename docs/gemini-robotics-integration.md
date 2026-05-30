@@ -74,7 +74,12 @@ It can also use **Google Search as a built-in tool** for questions like "find so
 
 ## New Module: `gemini_reasoner.py`
 
-A standalone module, similar in structure to `llm_command_generator.py`. Does not replace it — works alongside it.
+A standalone module, structured like the rest of the codebase (e.g. `navigation.py` /
+`robot_executor.py`). Works alongside the existing rule-based navigation, not in place of it.
+
+> Note: an earlier draft of this doc referenced `llm_command_generator.py` as a
+> template. That module (an abandoned LLM-navigation experiment) has since been
+> removed; scene-level LLM calls now live in `dashboard.py`'s `/api/describe`.
 
 ### Class: `GeminiReasoner`
 
@@ -352,7 +357,7 @@ Compare to running Gemini every 500ms: ~$250/hour. The escalation approach is ro
 
 | File | Why |
 |------|-----|
-| `llm_command_generator.py` | Groq fast loop stays exactly as-is |
+| `navigation.py` | Rule-based fast loop stays exactly as-is |
 | `camera_capture.py` | No changes needed — already provides frames |
 | `object_detector.py` | YOLO detection unchanged |
 | `robot_executor.py` | Already handles all the commands Gemini would generate |

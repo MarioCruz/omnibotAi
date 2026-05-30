@@ -1,28 +1,39 @@
-# Core
+# OmniAI — Python dependencies
+#
+# On the Raspberry Pi, create the venv with --system-site-packages so the
+# apt-provided picamera2 / libcamera stack is visible:
+#   python3 -m venv venv --system-site-packages
+#
+# System packages still required (apt, not pip):
+#   sudo apt install imx500-all libportaudio2 portaudio19-dev
+#   sudo apt install espeak-ng sox pipewire-audio   # speech + tone playback
+
+# --- Web dashboard ---
 flask>=3.0.0
 flask-cors>=4.0.0
-flask-socketio>=5.3.5
+flask-socketio>=5.3.5          # pulls in python-socketio; serves the live UI
+requests>=2.31.0               # Bluetooth/internet probes, optional Groq describe
 
-# Camera
+# --- Vision ---
+numpy>=1.24.0
+opencv-python>=4.8.0           # frame draw + MJPEG encode
+Pillow>=10.0.0                 # eye rendering
+
+# --- Camera (Raspberry Pi) ---
+# Provided by apt (imx500-all) and exposed via --system-site-packages.
+# Listed for reference; `pip install picamera2` is the off-Pi fallback.
 picamera2>=0.3.12
 
-# Vision & ML
-numpy>=1.24.0
-opencv-python>=4.8.0
-Pillow>=10.0.0
+# --- Audio output ---
+sounddevice>=0.4.6             # fallback player when pw-play/aplay are absent
 
-# Object Detection (choose one or more)
-# yolov5>=7.0.13        # Uncomment for YOLOv5 (requires torch)
-# mediapipe>=0.10.0     # Uncomment for MediaPipe
+# --- Eye display (install the one matching config.json "eye_display") ---
+luma.oled>=3.12.0              # SSD1351 OLED  — current default in config.json
+st7735>=0.0.4                  # ST7735S TFT   — alternate panel
+gpiodevice>=0.0.5              # GPIO backend used by the st7735 driver
 
-# LLM Integration
-ollama>=0.1.5
-requests>=2.31.0
-
-# WebSocket (optional)
-websocket-client>=1.7.0
-python-socketio>=5.10.0
-
-# Audio Control (Tomy Omnibot)
-# Requires: sudo apt install libportaudio2 portaudio19-dev
-sounddevice>=0.4.6
+# --- Optional detector backends (NOT the default imx500 path) ---
+# Uncomment only if you construct ObjectDetector(backend=...) with one of these.
+# torch>=2.0.0                 # backend='yolov5'
+# yolov5>=7.0.13               # backend='yolov5'
+# mediapipe>=0.10.0            # backend='mediapipe'
