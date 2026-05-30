@@ -35,7 +35,7 @@ sudo reboot
 cd ~/omniai
 python3 -m venv venv --system-site-packages
 source venv/bin/activate
-pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio opencv-python sounddevice st7735 gpiodevice
+pip install flask flask-cors flask-socketio requests opencv-python numpy sounddevice pillow st7735 gpiodevice luma.oled
 ```
 
 ### Enable Camera & SPI
@@ -322,16 +322,13 @@ rpicam-hello -t 5s
 vcgencmd get_camera
 
 # Test IMX500 with YOLO11
-python test_detection.py  # Opens https://omniai.local:8080
+python util/test_detection.py  # Opens https://omniai.local:8080
 
 # Check Pi temperature
 vcgencmd measure_temp
 
 # Network info
 hostname -I
-
-# Test Ollama
-curl http://localhost:11434/api/tags
 
 # Test audio
 speaker-test -t sine -f 1000 -l 1
@@ -342,7 +339,10 @@ python robot_executor.py
 ```
 
 ## Port Reference
-- `8080` - Dashboard (dashboard.py) / Test detection (test_detection.py)
+- `8080` - Dashboard (dashboard.py, HTTPS) / Test detection (util/test_detection.py)
+- `80` / `443` - Redirect front-door (`util/redirect_to_dashboard.py`), 301s to
+  `:8080` so the dashboard is reachable at `https://omniai.local` without the port.
+  Optional; installed via `util/omniai-redirect.service`.
 
 ## Dashboard Features
 
@@ -632,6 +632,15 @@ The unit (`util/omniai.service`) sets `Restart=on-failure` with a 5-second
 backoff and a 5-crash-in-2-minutes rate limit. stdout/stderr go to journald
 (rotation handled automatically). The dashboard itself calls `os._exit(1)`
 when the camera is stale for 60+ seconds so systemd restarts cleanly.
+
+Optional clean-URL redirect (`https://omniai.local` without `:8080`):
+```bash
+sudo cp ~/omniai/util/omniai-redirect.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now omniai-redirect   # binds 80/443 as root, 301 -> :8080
+```
+`util/redirect_to_dashboard.py` reuses the dashboard's `cert.pem`/`key.pem`.
+It's independent of `omniai.service`.
 
 ### Health checks
 `GET /healthz` returns a JSON snapshot:

@@ -23,6 +23,32 @@ AI-powered robot control using Raspberry Pi 5, IMX500 AI Camera with **YOLO11 ha
 
 ## Quick Start
 
+### 0. Flash Raspberry Pi OS
+
+Use **Raspberry Pi Imager** to write Raspberry Pi OS (64-bit) to the SD card.
+In the Imager's OS-customization screen, set:
+
+- **Hostname**: `OmniAi` → reachable as `omniai.local` over mDNS/Bonjour
+- **Enable SSH** (key auth recommended) — used for headless git deploys
+- **Wi-Fi SSID + password** and Wi-Fi country — so it joins on first boot
+
+Imager writes these into the boot partition as cloud-init `user-data` and
+`network-config`. **If your Wi-Fi network is hidden** (not broadcasting its
+SSID), edit `network-config` on the boot partition after flashing and add
+`hidden: true` under the access point — otherwise the Pi can't find it:
+
+```yaml
+  wifis:
+    wlan0:
+      access-points:
+        "YourSSID":
+          password: "your-wifi-password"
+          hidden: true          # required for non-broadcast networks
+```
+
+Boot the Pi, then find it with `ping omniai.local` (or scan your LAN — Pis
+show a `dc:a6:32` / `b8:27:eb` / `e4:5f:01` / `88:a2:9e` MAC).
+
 ### 1. Fresh Pi OS Install
 
 ```bash
@@ -39,7 +65,12 @@ sudo apt install imx500-all -y
 sudo apt install -y libcap-dev python3-dev python3-venv libportaudio2 portaudio19-dev \
     sox pipewire pipewire-audio-client-libraries espeak-ng
 
-# Reboot
+# Enable SPI (needed for the IMX500 firmware path and the eye display).
+# The camera is enabled by default on Bookworm; if not, enable it too:
+#   sudo raspi-config  → Interface Options → Camera → Enable
+sudo raspi-config nonint do_spi 0      # 0 = enable
+
+# Reboot (applies the kernel/firmware updates and the SPI change)
 sudo reboot
 ```
 
@@ -62,15 +93,20 @@ python3 -m venv venv --system-site-packages
 source venv/bin/activate
 
 # Install Python dependencies
-# - pillow: PIL image buffers for the OLED eye rendering
+# - flask + flask-cors + flask-socketio: dashboard server + live updates
+# - requests: calls the Groq API for the optional "describe scene" button
+# - opencv-python + numpy: MJPEG frame encoding and bbox math
+# - sounddevice: audio device probing (tones/speech play via sox + pw-play)
+# - pillow: PIL image buffers for the eye rendering
 # - st7735 + gpiodevice: drivers for the ST7735S TFT eye display
-# - luma.oled: driver for the SSD1351 OLED eye display (optional — pick one)
-pip install flask flask-cors flask-socketio requests ollama websocket-client python-socketio \
-    opencv-python sounddevice pillow st7735 gpiodevice luma.oled
+# - luma.oled: driver for the SSD1351 OLED eye display (pick the one you have)
+pip install flask flask-cors flask-socketio requests \
+    opencv-python numpy sounddevice pillow st7735 gpiodevice luma.oled
 
-# Optional: Set up Groq API key (for future LLM features like scene description)
-# echo "GROQ_API_KEY=your_api_key_here" > .env
-# Navigation uses rule-based math — no LLM needed
+# Optional: enable the "Describe scene" button with a free Groq API key.
+# Without it the dashboard still runs; describe falls back to a plain object list.
+# echo "GROQ_API_KEY=your_api_key_here" > .env   # .env is gitignored
+# Navigation itself is rule-based math — no LLM/API key required.
 ```
 
 ### 4. Getting Started
@@ -134,6 +170,9 @@ Open in a browser on the same network:
 `omniai.local` is the Pi's mDNS/Bonjour name (the hostname set during Pi OS
 setup). If it doesn't resolve, use the Pi's IP from `hostname -I`.
 
+> Tip: install the redirect front-door (see *Clean URL* below) to drop the
+> `:8080` and just use **https://omniai.local**.
+
 #### HTTPS (optional)
 
 The dashboard serves HTTPS if `cert.pem` and `key.pem` exist in the project
@@ -147,6 +186,26 @@ openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem \
 
 Both files are gitignored (`*.pem`). Browsers will still show a one-time
 "not trusted" warning since it's self-signed — accept it once per device.
+
+#### Clean URL: `https://omniai.local` (drop the `:8080`)
+
+The dashboard binds port 8080 (an unprivileged port the `admin` user can
+use). To reach it at plain **`https://omniai.local`** without typing the
+port, install the tiny redirect front-door, which listens on ports 80 and
+443 and `301`-redirects every request to `:8080` (reusing the same
+`cert.pem`/`key.pem`):
+
+```bash
+sudo cp ~/omniai/util/omniai-redirect.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now omniai-redirect
+```
+
+Now `http://omniai.local` and `https://omniai.local` both land on the
+dashboard, paths preserved (`/kids` → `:8080/kids`). Because it's a redirect
+(not a reverse proxy), the browser touches two origins — `:443` then
+`:8080` — so the self-signed warning may appear once per origin the first
+time. See `util/redirect_to_dashboard.py` for the implementation.
 
 #### Other helpful tests
 
@@ -216,7 +275,9 @@ omniai/
 │   ├── generate_phrases.sh   # Generate WAVs for pre-recorded phrases
 │   ├── service.sh            # Wrapper for systemctl start/stop/restart
 │   ├── install_service.sh    # Install omniai.service into systemd
-│   ├── omniai.service        # systemd unit
+│   ├── omniai.service        # systemd unit (dashboard on :8080)
+│   ├── redirect_to_dashboard.py # 80/443 -> :8080 redirect (clean URL)
+│   ├── omniai-redirect.service  # systemd unit for the redirect front-door
 │   └── start.sh              # Manual launcher (used by the service)
 ├── CLAUDE.md                 # Technical reference for Claude Code
 └── README.md                 # This file
@@ -537,7 +598,7 @@ vcgencmd get_camera
 ```
 
 ### Detection not showing objects
-1. Run `python test_detection.py` first to verify hardware works
+1. Run `python3 util/test_camera_ai.py --seconds 10` first to verify the AI pipeline works
 2. Check confidence threshold (default 0.3 = 30%)
 3. Ensure good lighting - AI cameras need decent light
 
@@ -593,6 +654,19 @@ reloads systemd, enables it at boot, and starts it. The unit sets
 `Restart=on-failure` with a 5-second backoff and a 5-crash-in-2-minutes
 rate limit. The dashboard itself calls `os._exit(1)` when the camera is
 stale for 60+ seconds, so systemd restarts it cleanly.
+
+To also serve the clean `https://omniai.local` URL (no `:8080`), install the
+redirect front-door unit alongside it:
+
+```bash
+sudo cp ~/omniai/util/omniai-redirect.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now omniai-redirect
+```
+
+It runs as root (to bind the privileged ports 80/443) and `301`-redirects to
+the dashboard on `:8080`. It's independent of `omniai.service` — if the
+dashboard restarts, the redirect keeps working.
 
 Day-to-day commands — use the `util/service.sh` wrapper:
 
@@ -665,7 +739,7 @@ The IMX500 has **16MB flash** for caching multiple models. With 2-3MB models, yo
 - [IMX500 Documentation](https://www.raspberrypi.com/documentation/accessories/ai-camera.html)
 - [IMX500 Model Zoo](https://github.com/raspberrypi/imx500-models)
 - [Picamera2 Examples](https://github.com/raspberrypi/picamera2/tree/main/examples/imx500)
-- [Ollama](https://ollama.ai/)
+- [Groq Console](https://console.groq.com) (free API key for the "describe scene" button)
 - [Brain Builder for AITRIOS](https://info.aitrios.sony-semicon.com/developers-blog/build-custom-ai-models-for-raspberry-pi-ai-camera-zero-coding-required)
 - [Custom Model Tutorial](https://www.hackster.io/541341/how-to-create-a-custom-object-detection-ai-model-pt-1-f7203e)
 
