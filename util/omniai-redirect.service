@@ -1,0 +1,19 @@
+[Unit]
+Description=OmniBot dashboard redirect (ports 80/443 -> :8080)
+After=network.target
+# Best-effort: start alongside the dashboard, but the redirect is independent
+# (it 301s to :8080 even if the dashboard is briefly down).
+Wants=omniai.service
+
+[Service]
+Type=simple
+# Must run as root to bind the privileged ports 80 and 443.
+ExecStart=/usr/bin/python3 /home/admin/omniai/util/redirect_to_dashboard.py
+Restart=on-failure
+RestartSec=3
+# Crash-loop backstop, mirrors omniai.service.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Install]
+WantedBy=multi-user.target
