@@ -145,8 +145,11 @@ def _persist_token_cookie(resp):
     # Remember a valid query token so subsequent same-origin API calls (the
     # dashboard's own buttons) authenticate via cookie without re-entering it.
     if DASHBOARD_TOKEN and request.args.get('token', '').strip() == DASHBOARD_TOKEN:
+        # Mark Secure only when actually served over HTTPS — otherwise the
+        # browser silently drops the cookie on the plain-HTTP (--no-ssl /
+        # missing cert) fallback and the UI can never stay authorized.
         resp.set_cookie('omni_token', DASHBOARD_TOKEN, max_age=60 * 60 * 24 * 365,
-                        secure=True, httponly=True, samesite='Lax')
+                        secure=request.is_secure, httponly=True, samesite='Lax')
     return resp
 
 # Global state
