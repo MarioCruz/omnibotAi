@@ -648,6 +648,40 @@ vcgencmd get_camera
 - If slower, check if running other processes
 - Try MobileNet SSD for faster (but less accurate) detection
 
+### Pi keeps dropping off the network (`omniai.local` won't resolve, SSH times out, dashboard briefly unreachable)
+
+This is almost always **WiFi power-save** — the Pi's WiFi radio sleeps between
+packets, so the device intermittently stops answering mDNS/ping/SSH and then
+recovers a moment later. The robot isn't crashing; its radio dozed off.
+
+Check it (`iw` lives in `/usr/sbin`, which may not be on a headless SSH `PATH`):
+
+```bash
+/usr/sbin/iw dev wlan0 get power_save     # "Power save: on" = the problem
+```
+
+Fix it — runtime (immediate, no disconnect) **and** persist it so it survives
+reboots (Raspberry Pi OS Bookworm uses NetworkManager):
+
+```bash
+sudo /usr/sbin/iw dev wlan0 set power_save off                      # right now
+sudo nmcli connection modify "<your-wifi-name>" 802-11-wireless.powersave 2   # 2 = disable, persistent
+```
+
+Replace `<your-wifi-name>` with your connection (list them via
+`nmcli connection show`). Verify: `/usr/sbin/iw dev wlan0 get power_save` →
+`Power save: off`. On a wall-powered robot the extra power draw is negligible.
+
+### Headless log spam: `Failed to start rpi-connect-wayvnc.service`
+
+On a headless Pi, Raspberry Pi Connect's screen-sharing (WayVNC) component
+fails to start every few seconds (no display session) and floods the journal.
+It's harmless, but you can quiet it without touching the rest of Connect:
+
+```bash
+systemctl --user disable --now rpi-connect-wayvnc.service
+```
+
 ## Development
 
 Primary development happens on local machine, deploy to Pi:
