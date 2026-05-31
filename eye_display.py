@@ -301,8 +301,11 @@ class EyeDisplay:
                 # Draw the eye
                 self._draw_eye()
 
-                # Update display (rotation handled in _push)
-                self._push(self.image)
+                # The eye art is authored a half-turn off from the boot/IP screen
+                # (_draw_boot). Both share one eye_rotation in _push, so without this
+                # the value that makes the IP text upright leaves the eye upside down.
+                # Apply the 180° correction here so a single eye_rotation serves both.
+                self._push(self.image.rotate(180, expand=False))
 
                 time.sleep(0.033)  # ~30 FPS
 
