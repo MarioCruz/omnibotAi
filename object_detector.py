@@ -133,10 +133,17 @@ class ObjectDetector:
 
     def _detect_imx500(self, frame: np.ndarray) -> List[Dict]:
         """
-        Get detections from IMX500 hardware accelerator using official picamera2 API.
+        Get detections from IMX500 hardware accelerator via the official
+        picamera2 API (imx500.get_outputs() with add_batch=True).
 
-        Uses imx500.get_outputs() with add_batch=True and handles model-specific
-        bbox_normalization and bbox_order from NetworkIntrinsics.
+        YOLO-only parser. It ASSUMES xy box order ([x1, y1, x2, y2]) and does
+        NOT consult intrinsics.bbox_order; normalization is inferred from the
+        value range rather than intrinsics.bbox_normalization; and coordinates
+        are mapped to the frame with the letterbox math below rather than
+        imx500.convert_inference_coords(). This is correct for the default
+        YOLO11 model but would mis-project yx-ordered models (SSD MobileNet,
+        EfficientDet) — see the supported-models note in README/CLAUDE.md.
+        (nanodet has its own branch above.)
         """
         detections = []
 
@@ -198,8 +205,9 @@ class ObjectDetector:
                 box = boxes[i]
                 coords = box.flatten() if hasattr(box, 'flatten') else list(box)
 
-                # YOLOv8 _pp output: [x1, y1, x2, y2] normalized to [0,1]
-                # (bbox_order "xy" means data IS in xy order — no swap needed)
+                # YOLO _pp output: [x1, y1, x2, y2] normalized to [0,1].
+                # We ASSUME xy order (YOLO-only) — intrinsics.bbox_order is not
+                # consulted, so a yx-ordered model would be transposed here.
                 nx1, ny1, nx2, ny2 = float(coords[0]), float(coords[1]), float(coords[2]), float(coords[3])
 
                 # Convert from model space (square) to frame space (may be non-square)
@@ -264,8 +272,12 @@ class ObjectDetector:
 
     def set_picam2(self, picam2):
         """
-        Set the Picamera2 instance for coordinate conversion.
-        This enables using imx500.convert_inference_coords() for accurate bbox mapping.
+        Store the Picamera2 instance.
+
+        NOTE: informational only right now — the IMX500 path maps coordinates
+        with its own letterbox math and does NOT call
+        imx500.convert_inference_coords(). Kept for API compatibility and as
+        the hook a future convert_inference_coords()-based mapper would use.
 
         Args:
             picam2: Picamera2 instance (must have camera_configuration attribute)
